@@ -1,330 +1,496 @@
-import csv
-from datetime import datetime
+import re
+import unicodedata
+from pathlib import Path
 
 import pandas as pd
 
-from core.formatters import converter_numero_br
+from core.formatters import normalizar_texto
 
 
-COLUNAS_ORIGINAIS = {
-    "pedido": "Pedido - Pedido (Número)",
-    "codigo_cliente": "Pedido - Cliente (Código)",
-    "cliente": "Cliente - Razão social (Cliente)",
-    "data_emissao": "Pedido - Data de emissão",
-    "data_base_faturamento": "Pedido - Data base de faturamento",
-    "data_entrega": "Pedido - Data de entrega",
-    "data_previsao_faturamento": "Pedido - Data de previsão de faturamento",
-    "item": "Item",
-    "descricao_item": "Item - Descrição (Item)",
-    "qtde_solicitada": "Qtde. solicitada",
-    "qtde_faturada": "Qtde. faturada",
-    "valor_unitario": "Valor unitário",
-    "valor_total": "Valor total",
-    "grupo_faturamento": "Grupo de faturamento - Descrição (Grupo Faturamento)",
-    "observacao": "Pedido - Observação 01",
+COLUNAS_OBRIGATORIAS = [
+    "Pedido",
+    "Cliente",
+    "Item",
+    "Descrição Item",
+    "Saldo a Faturar",
+    "Valor em Carteira",
+    "Data Entrega",
+    "Grupo Faturamento",
+]
+
+
+COLUNAS_OPCIONAIS_PADRAO = {
+    "Observação": "",
 }
 
 
-def detectar_encoding(caminho_arquivo):
-    encodings = ["utf-8-sig", "utf-8", "cp1252", "latin1"]
+MAPEAMENTO_COLUNAS = {
+    # Pedido
+    "PEDIDO": "Pedido",
+    "N PEDIDO": "Pedido",
+    "NUMERO PEDIDO": "Pedido",
+    "NUMERO DO PEDIDO": "Pedido",
+    "ORDEM": "Pedido",
+    "PEDIDO PEDIDO NUMERO": "Pedido",
+    "PEDIDO NUMERO": "Pedido",
 
-    for encoding in encodings:
-        try:
-            with open(caminho_arquivo, "r", encoding=encoding) as arquivo:
-                arquivo.read(5000)
-            return encoding
-        except UnicodeDecodeError:
-            continue
+    # Cliente
+    "CLIENTE": "Cliente",
+    "NOME CLIENTE": "Cliente",
+    "NOME DO CLIENTE": "Cliente",
+    "RAZAO SOCIAL": "Cliente",
+    "DESCRICAO CLIENTE": "Cliente",
+    "CLIENTE RAZAO SOCIAL CLIENTE": "Cliente",
 
-    return "latin1"
+    # Item
+    "ITEM": "Item",
+    "COD ITEM": "Item",
+    "CODIGO ITEM": "Item",
+    "CODIGO DO ITEM": "Item",
+    "PRODUTO": "Item",
+
+    # Descrição do item
+    "DESCRICAO ITEM": "Descrição Item",
+    "DESCRIÇÃO ITEM": "Descrição Item",
+    "DESCRICAO DO ITEM": "Descrição Item",
+    "DESCRIÇÃO DO ITEM": "Descrição Item",
+    "DESC ITEM": "Descrição Item",
+    "ITEM DESCRICAO ITEM": "Descrição Item",
+
+    # Quantidade / saldo
+    "SALDO A FATURAR": "Saldo a Faturar",
+    "QTDE A FATURAR": "Saldo a Faturar",
+    "QTD A FATURAR": "Saldo a Faturar",
+    "QUANTIDADE A FATURAR": "Saldo a Faturar",
+    "SALDO": "Saldo a Faturar",
+
+    # Quantidade solicitada/faturada do ERP
+    "QTDE SOLICITADA": "Qtde Solicitada",
+    "QTD SOLICITADA": "Qtde Solicitada",
+    "QUANTIDADE SOLICITADA": "Qtde Solicitada",
+    "QTDE FATURADA": "Qtde Faturada",
+    "QTD FATURADA": "Qtde Faturada",
+    "QUANTIDADE FATURADA": "Qtde Faturada",
+
+    # Valores
+    "VALOR EM CARTEIRA": "Valor em Carteira",
+    "VALOR CARTEIRA": "Valor em Carteira",
+    "VALOR": "Valor em Carteira",
+    "VALOR TOTAL": "Valor em Carteira",
+    "VLR CARTEIRA": "Valor em Carteira",
+
+    "VALOR UNITARIO": "Valor Unitário",
+    "VLR UNITARIO": "Valor Unitário",
+
+    # Datas
+    "DATA ENTREGA": "Data Entrega",
+    "DATA DE ENTREGA": "Data Entrega",
+    "ENTREGA": "Data Entrega",
+    "PREVISAO ENTREGA": "Data Entrega",
+    "PREVISÃO ENTREGA": "Data Entrega",
+    "PREVISAO DE FATURAMENTO": "Data Entrega",
+    "PREVISÃO DE FATURAMENTO": "Data Entrega",
+    "PEDIDO DATA DE ENTREGA": "Data Entrega",
+    "PEDIDO DATA DE PREVISAO DE FATURAMENTO": "Data Entrega",
+
+    # Grupo de faturamento
+    "GRUPO FATURAMENTO": "Grupo Faturamento",
+    "GRUPO DE FATURAMENTO": "Grupo Faturamento",
+    "GR FATURAMENTO": "Grupo Faturamento",
+    "GF": "Grupo Faturamento",
+    "GRUPO DE FATURAMENTO DESCRICAO GRUPO FATURAMENTO": "Grupo Faturamento",
+
+    # Observação
+    "OBSERVACAO": "Observação",
+    "OBSERVAÇÃO": "Observação",
+    "OBS": "Observação",
+    "OBSERVACOES": "Observação",
+    "OBSERVAÇÕES": "Observação",
+    "PEDIDO OBSERVACAO 01": "Observação",
+}
 
 
-def detectar_separador(caminho_arquivo, encoding):
-    with open(caminho_arquivo, "r", encoding=encoding, errors="replace") as arquivo:
-        amostra = arquivo.read(5000)
+def normalizar_nome_coluna(nome):
+    texto = str(nome).strip()
+
+    texto = unicodedata.normalize("NFKD", texto)
+    texto = "".join(char for char in texto if not unicodedata.combining(char))
+
+    texto = texto.upper()
+    texto = re.sub(r"[^A-Z0-9]+", " ", texto)
+    texto = re.sub(r"\s+", " ", texto).strip()
+
+    return texto
+
+
+def identificar_coluna_padrao(nome_coluna):
+    chave = normalizar_nome_coluna(nome_coluna)
+
+    if chave in MAPEAMENTO_COLUNAS:
+        return MAPEAMENTO_COLUNAS[chave]
+
+    if chave.startswith("PEDIDO PEDIDO") and "NUMERO" in chave:
+        return "Pedido"
+
+    if chave.startswith("CLIENTE RAZAO SOCIAL"):
+        return "Cliente"
+
+    if chave.startswith("ITEM DESCRICAO"):
+        return "Descrição Item"
+
+    if chave.startswith("PEDIDO DATA DE ENTREGA"):
+        return "Data Entrega"
+
+    if "DATA" in chave and "PREVISAO" in chave and "FATURAMENTO" in chave:
+        return "Data Entrega"
+
+    if chave.startswith("GRUPO DE FATURAMENTO") and "DESCRICAO" in chave:
+        return "Grupo Faturamento"
+
+    if chave.startswith("PEDIDO OBSERVACAO"):
+        return "Observação"
+
+    if "QTDE" in chave and "SOLICITADA" in chave:
+        return "Qtde Solicitada"
+
+    if "QTD" in chave and "SOLICITADA" in chave:
+        return "Qtde Solicitada"
+
+    if "QUANTIDADE" in chave and "SOLICITADA" in chave:
+        return "Qtde Solicitada"
+
+    if "QTDE" in chave and "FATURADA" in chave:
+        return "Qtde Faturada"
+
+    if "QTD" in chave and "FATURADA" in chave:
+        return "Qtde Faturada"
+
+    if "QUANTIDADE" in chave and "FATURADA" in chave:
+        return "Qtde Faturada"
+
+    if "VALOR" in chave and "TOTAL" in chave:
+        return "Valor em Carteira"
+
+    if "VALOR" in chave and "CARTEIRA" in chave:
+        return "Valor em Carteira"
+
+    if "VALOR" in chave and "UNITARIO" in chave:
+        return "Valor Unitário"
+
+    return str(nome_coluna).strip()
+
+
+def converter_numero(valor):
+    if pd.isna(valor):
+        return 0.0
+
+    if isinstance(valor, (int, float)):
+        return float(valor)
+
+    texto = str(valor).strip()
+
+    if not texto:
+        return 0.0
+
+    texto = texto.replace("R$", "").replace(" ", "")
+
+    if "," in texto and "." in texto:
+        texto = texto.replace(".", "").replace(",", ".")
+    elif "," in texto:
+        texto = texto.replace(",", ".")
+
+    texto = re.sub(r"[^0-9.\-]", "", texto)
+
+    if not texto or texto in {"-", ".", "-."}:
+        return 0.0
 
     try:
-        dialecto = csv.Sniffer().sniff(amostra)
-        return dialecto.delimiter
-    except Exception:
-        if "\t" in amostra:
-            return "\t"
-        if ";" in amostra:
-            return ";"
-        if "," in amostra:
-            return ","
-
-    return ";"
+        return float(texto)
+    except ValueError:
+        return 0.0
 
 
-def carregar_carteira(caminho_arquivo):
-    encoding = detectar_encoding(caminho_arquivo)
-    separador = detectar_separador(caminho_arquivo, encoding)
+def formatar_data(valor):
+    if pd.isna(valor):
+        return ""
 
-    df = pd.read_csv(
-        caminho_arquivo,
-        sep=separador,
-        encoding=encoding,
-        dtype=str,
-        engine="python"
-    )
+    texto = str(valor).strip()
 
-    df.columns = df.columns.str.strip()
+    if not texto:
+        return ""
 
-    colunas_necessarias = list(COLUNAS_ORIGINAIS.values())
-    colunas_faltando = [coluna for coluna in colunas_necessarias if coluna not in df.columns]
+    data = pd.to_datetime(texto, errors="coerce", dayfirst=True)
 
-    if colunas_faltando:
-        raise ValueError(
-            "O arquivo importado não tem todas as colunas necessárias.\n\n"
-            "Colunas faltando:\n"
-            + "\n".join(colunas_faltando)
-        )
+    if pd.isna(data):
+        return texto
 
-    df = df[colunas_necessarias].copy()
+    return data.strftime("%d/%m/%Y")
 
-    df.rename(
-        columns={
-            COLUNAS_ORIGINAIS["pedido"]: "Pedido",
-            COLUNAS_ORIGINAIS["codigo_cliente"]: "Código Cliente",
-            COLUNAS_ORIGINAIS["cliente"]: "Cliente",
-            COLUNAS_ORIGINAIS["data_emissao"]: "Data Emissão",
-            COLUNAS_ORIGINAIS["data_base_faturamento"]: "Data Base Faturamento",
-            COLUNAS_ORIGINAIS["data_entrega"]: "Data Entrega",
-            COLUNAS_ORIGINAIS["data_previsao_faturamento"]: "Previsão Faturamento",
-            COLUNAS_ORIGINAIS["item"]: "Item",
-            COLUNAS_ORIGINAIS["descricao_item"]: "Descrição Item",
-            COLUNAS_ORIGINAIS["qtde_solicitada"]: "Qtde Solicitada",
-            COLUNAS_ORIGINAIS["qtde_faturada"]: "Qtde Faturada",
-            COLUNAS_ORIGINAIS["valor_unitario"]: "Valor Unitário",
-            COLUNAS_ORIGINAIS["valor_total"]: "Valor Total",
-            COLUNAS_ORIGINAIS["grupo_faturamento"]: "Grupo Faturamento",
-            COLUNAS_ORIGINAIS["observacao"]: "Observação",
-        },
-        inplace=True
-    )
 
-    df.insert(0, "ID Linha", range(1, len(df) + 1))
+def ler_csv_com_fallback(caminho):
+    caminho = Path(caminho)
 
-    df["Qtde Solicitada"] = converter_numero_br(df["Qtde Solicitada"])
-    df["Qtde Faturada"] = converter_numero_br(df["Qtde Faturada"])
-    df["Valor Unitário"] = converter_numero_br(df["Valor Unitário"])
-    df["Valor Total"] = converter_numero_br(df["Valor Total"])
+    if not caminho.exists():
+        raise FileNotFoundError(f"Arquivo não encontrado: {caminho}")
 
-    df["Saldo a Faturar"] = df["Qtde Solicitada"] - df["Qtde Faturada"]
-    df["Valor em Carteira"] = df["Saldo a Faturar"] * df["Valor Unitário"]
+    tentativas = [
+        {"encoding": "utf-8-sig", "sep": None},
+        {"encoding": "cp1252", "sep": None},
+        {"encoding": "latin1", "sep": None},
+        {"encoding": "utf-8-sig", "sep": "\t"},
+        {"encoding": "cp1252", "sep": "\t"},
+        {"encoding": "latin1", "sep": "\t"},
+        {"encoding": "utf-8-sig", "sep": ";"},
+        {"encoding": "cp1252", "sep": ";"},
+        {"encoding": "latin1", "sep": ";"},
+        {"encoding": "utf-8-sig", "sep": ","},
+        {"encoding": "cp1252", "sep": ","},
+        {"encoding": "latin1", "sep": ","},
+    ]
 
-    df["% Faturado"] = df.apply(
-        lambda linha: (linha["Qtde Faturada"] / linha["Qtde Solicitada"] * 100)
-        if linha["Qtde Solicitada"] > 0 else 0,
-        axis=1
-    )
+    ultimo_erro = None
 
-    df["Status"] = df.apply(definir_status, axis=1)
+    for tentativa in tentativas:
+        try:
+            df = pd.read_csv(
+                caminho,
+                sep=tentativa["sep"],
+                encoding=tentativa["encoding"],
+                engine="python",
+                dtype=str,
+            )
 
-    df["Previsão Faturamento Data"] = pd.to_datetime(
-        df["Previsão Faturamento"],
-        format="%d/%m/%Y",
-        errors="coerce"
-    )
+            if len(df.columns) > 1:
+                return df
 
-    hoje = pd.Timestamp(datetime.today().date())
+        except Exception as erro:
+            ultimo_erro = erro
 
-    df["Situação Prazo"] = df.apply(
-        lambda linha: "Vencido"
-        if pd.notna(linha["Previsão Faturamento Data"])
-        and linha["Previsão Faturamento Data"] < hoje
-        and linha["Saldo a Faturar"] > 0
-        else "No prazo",
-        axis=1
-    )
+    raise ValueError(
+        "Não foi possível ler o arquivo CSV. "
+        "Verifique se ele está separado por tabulação, ponto e vírgula ou vírgula, "
+        "e se não está aberto/bloqueado em outro programa."
+    ) from ultimo_erro
 
-    df.drop(columns=["Previsão Faturamento Data"], inplace=True)
+
+def consolidar_colunas_duplicadas(df):
+    resultado = pd.DataFrame(index=df.index)
+
+    for nome_coluna in dict.fromkeys(df.columns):
+        colunas = df.loc[:, df.columns == nome_coluna]
+
+        if colunas.shape[1] == 1:
+            resultado[nome_coluna] = colunas.iloc[:, 0]
+            continue
+
+        serie = colunas.iloc[:, 0].astype(str)
+
+        for indice in range(1, colunas.shape[1]):
+            candidata = colunas.iloc[:, indice].astype(str)
+
+            mascara_vazia = serie.str.strip().isin(["", "nan", "None", "NaN"])
+            serie = serie.where(~mascara_vazia, candidata)
+
+        resultado[nome_coluna] = serie
+
+    return resultado
+
+
+def padronizar_colunas(df):
+    renomear = {}
+
+    for coluna in df.columns:
+        renomear[coluna] = identificar_coluna_padrao(coluna)
+
+    df = df.rename(columns=renomear)
+    df = consolidar_colunas_duplicadas(df)
 
     return df
 
 
-def definir_status(linha):
-    qtde_solicitada = linha["Qtde Solicitada"]
-    qtde_faturada = linha["Qtde Faturada"]
-    saldo = linha["Saldo a Faturar"]
+def garantir_colunas_calculadas(df):
+    df = df.copy()
 
-    if saldo <= 0:
-        return "Faturado"
+    if "Saldo a Faturar" not in df.columns:
+        if "Qtde Solicitada" in df.columns and "Qtde Faturada" in df.columns:
+            df["Saldo a Faturar"] = (
+                df["Qtde Solicitada"].apply(converter_numero)
+                - df["Qtde Faturada"].apply(converter_numero)
+            )
+        elif "Qtde Solicitada" in df.columns:
+            df["Saldo a Faturar"] = df["Qtde Solicitada"].apply(converter_numero)
 
-    if qtde_faturada > 0 and qtde_faturada < qtde_solicitada:
-        return "Parcial"
+    if "Valor em Carteira" not in df.columns:
+        if "Valor Unitário" in df.columns and "Saldo a Faturar" in df.columns:
+            df["Valor em Carteira"] = (
+                df["Valor Unitário"].apply(converter_numero)
+                * df["Saldo a Faturar"].apply(converter_numero)
+            )
 
-    return "Aberto"
-
-
-def gerar_resumo(df):
-    return {
-        "Total de Linhas": len(df),
-        "Pedidos Únicos": df["Pedido"].nunique(),
-        "Clientes Únicos": df["Cliente"].nunique(),
-        "Itens Únicos": df["Item"].nunique(),
-        "Qtde Solicitada": df["Qtde Solicitada"].sum(),
-        "Qtde Faturada": df["Qtde Faturada"].sum(),
-        "Saldo a Faturar": df["Saldo a Faturar"].sum(),
-        "Valor Total": df["Valor Total"].sum(),
-        "Valor em Carteira": df["Valor em Carteira"].sum(),
-        "Itens Vencidos": len(df[df["Situação Prazo"] == "Vencido"]),
-    }
+    return df
 
 
-def consolidar_por_item(df):
-    resultado = df.groupby(
-        ["Item", "Descrição Item"],
-        as_index=False
-    ).agg({
-        "Pedido": "nunique",
-        "Cliente": "nunique",
-        "Qtde Solicitada": "sum",
-        "Qtde Faturada": "sum",
-        "Saldo a Faturar": "sum",
-        "Valor Total": "sum",
-        "Valor em Carteira": "sum",
-    })
+def validar_colunas_obrigatorias(df):
+    faltantes = [
+        coluna for coluna in COLUNAS_OBRIGATORIAS
+        if coluna not in df.columns
+    ]
 
-    resultado.rename(
-        columns={
-            "Pedido": "Qtd. Pedidos",
-            "Cliente": "Qtd. Clientes",
-        },
-        inplace=True
+    if not faltantes:
+        return
+
+    colunas_encontradas = "\n".join(f"- {coluna}" for coluna in df.columns)
+    colunas_faltantes = "\n".join(f"- {coluna}" for coluna in faltantes)
+
+    raise ValueError(
+        "O arquivo importado não possui todas as colunas obrigatórias.\n\n"
+        "Colunas faltantes:\n"
+        f"{colunas_faltantes}\n\n"
+        "Colunas encontradas no arquivo:\n"
+        f"{colunas_encontradas}\n\n"
+        "O CSV pode estar correto, mas o programa ainda não reconheceu algum nome de coluna do ERP."
     )
 
-    resultado.sort_values("Valor em Carteira", ascending=False, inplace=True)
 
-    return resultado
+def preparar_dataframe(df):
+    df = df.copy()
 
+    for coluna, valor_padrao in COLUNAS_OPCIONAIS_PADRAO.items():
+        if coluna not in df.columns:
+            df[coluna] = valor_padrao
 
-def consolidar_por_pedido(df):
-    resultado = df.groupby(
-        ["Pedido", "Cliente", "Grupo Faturamento", "Previsão Faturamento"],
-        as_index=False
-    ).agg({
-        "Item": "nunique",
-        "Qtde Solicitada": "sum",
-        "Qtde Faturada": "sum",
-        "Saldo a Faturar": "sum",
-        "Valor Total": "sum",
-        "Valor em Carteira": "sum",
-    })
+    df = garantir_colunas_calculadas(df)
 
-    resultado.rename(
-        columns={
-            "Item": "Qtd. Itens",
-        },
-        inplace=True
-    )
+    validar_colunas_obrigatorias(df)
 
-    resultado.sort_values("Valor em Carteira", ascending=False, inplace=True)
+    df = df.fillna("")
 
-    return resultado
+    df["Pedido"] = df["Pedido"].astype(str).str.strip()
+    df["Cliente"] = df["Cliente"].astype(str).str.strip()
+    df["Item"] = df["Item"].astype(str).str.strip()
+    df["Descrição Item"] = df["Descrição Item"].astype(str).str.strip()
+    df["Observação"] = df["Observação"].astype(str).str.strip()
+    df["Grupo Faturamento"] = df["Grupo Faturamento"].astype(str).str.strip()
+    df["Data Entrega"] = df["Data Entrega"].apply(formatar_data)
 
+    df["Saldo a Faturar"] = df["Saldo a Faturar"].apply(converter_numero)
+    df["Valor em Carteira"] = df["Valor em Carteira"].apply(converter_numero)
 
-def consolidar_por_cliente(df):
-    resultado = df.groupby(
-        ["Código Cliente", "Cliente"],
-        as_index=False
-    ).agg({
-        "Pedido": "nunique",
-        "Item": "nunique",
-        "Qtde Solicitada": "sum",
-        "Qtde Faturada": "sum",
-        "Saldo a Faturar": "sum",
-        "Valor Total": "sum",
-        "Valor em Carteira": "sum",
-    })
+    df = df[df["Pedido"] != ""].copy()
+    df = df[df["Item"] != ""].copy()
 
-    resultado.rename(
-        columns={
-            "Pedido": "Qtd. Pedidos",
-            "Item": "Qtd. Itens",
-        },
-        inplace=True
-    )
+    if df.empty:
+        raise ValueError(
+            "O arquivo foi lido, mas não restaram linhas válidas. "
+            "Verifique se há pedidos, itens e saldo a faturar no CSV."
+        )
 
-    resultado.sort_values("Valor em Carteira", ascending=False, inplace=True)
+    df.reset_index(drop=True, inplace=True)
+    df["ID Linha"] = df.index + 1
 
-    return resultado
+    return df
 
 
-def consolidar_por_grupo(df):
-    resultado = df.groupby(
-        ["Grupo Faturamento"],
-        as_index=False
-    ).agg({
-        "Pedido": "nunique",
-        "Cliente": "nunique",
-        "Item": "nunique",
-        "Qtde Solicitada": "sum",
-        "Qtde Faturada": "sum",
-        "Saldo a Faturar": "sum",
-        "Valor Total": "sum",
-        "Valor em Carteira": "sum",
-    })
+def carregar_carteira(caminho):
+    df = ler_csv_com_fallback(caminho)
+    df = padronizar_colunas(df)
+    df = preparar_dataframe(df)
 
-    resultado.rename(
-        columns={
-            "Pedido": "Qtd. Pedidos",
-            "Cliente": "Qtd. Clientes",
-            "Item": "Qtd. Itens",
-        },
-        inplace=True
-    )
-
-    resultado.sort_values("Valor em Carteira", ascending=False, inplace=True)
-
-    return resultado
-
-
-def consolidar_por_previsao(df):
-    resultado = df.groupby(
-        ["Previsão Faturamento"],
-        as_index=False
-    ).agg({
-        "Pedido": "nunique",
-        "Cliente": "nunique",
-        "Item": "nunique",
-        "Qtde Solicitada": "sum",
-        "Qtde Faturada": "sum",
-        "Saldo a Faturar": "sum",
-        "Valor Total": "sum",
-        "Valor em Carteira": "sum",
-    })
-
-    resultado.rename(
-        columns={
-            "Pedido": "Qtd. Pedidos",
-            "Cliente": "Qtd. Clientes",
-            "Item": "Qtd. Itens",
-        },
-        inplace=True
-    )
-
-    return resultado
+    return df
 
 
 def obter_consolidacao(df, tipo):
-    if tipo == "Carteira Detalhada":
-        return df.copy()
+    if df is None or df.empty:
+        return pd.DataFrame()
 
-    if tipo == "Por Item":
-        return consolidar_por_item(df)
+    tipo_normalizado = normalizar_nome_coluna(tipo)
 
-    if tipo == "Por Pedido":
-        return consolidar_por_pedido(df)
+    if tipo_normalizado == "POR ITEM":
+        return (
+            df.groupby(["Item", "Descrição Item"], as_index=False)
+            .agg({
+                "Pedido": "nunique",
+                "Cliente": "nunique",
+                "Saldo a Faturar": "sum",
+                "Valor em Carteira": "sum",
+            })
+            .rename(columns={
+                "Pedido": "Qtd. Pedidos",
+                "Cliente": "Qtd. Clientes",
+                "Saldo a Faturar": "Qtde",
+                "Valor em Carteira": "Valor",
+            })
+            .sort_values("Valor", ascending=False)
+        )
 
-    if tipo == "Por Cliente":
-        return consolidar_por_cliente(df)
+    if tipo_normalizado == "POR PEDIDO":
+        return (
+            df.groupby(["Pedido", "Cliente"], as_index=False)
+            .agg({
+                "Item": "nunique",
+                "Saldo a Faturar": "sum",
+                "Valor em Carteira": "sum",
+            })
+            .rename(columns={
+                "Item": "Qtd. Itens",
+                "Saldo a Faturar": "Qtde",
+                "Valor em Carteira": "Valor",
+            })
+            .sort_values("Valor", ascending=False)
+        )
 
-    if tipo == "Por Grupo de Faturamento":
-        return consolidar_por_grupo(df)
+    if tipo_normalizado == "POR CLIENTE":
+        return (
+            df.groupby("Cliente", as_index=False)
+            .agg({
+                "Pedido": "nunique",
+                "Item": "nunique",
+                "Saldo a Faturar": "sum",
+                "Valor em Carteira": "sum",
+            })
+            .rename(columns={
+                "Pedido": "Qtd. Pedidos",
+                "Item": "Qtd. Itens",
+                "Saldo a Faturar": "Qtde",
+                "Valor em Carteira": "Valor",
+            })
+            .sort_values("Valor", ascending=False)
+        )
 
-    if tipo == "Por Previsão de Faturamento":
-        return consolidar_por_previsao(df)
+    if tipo_normalizado == "POR GRUPO DE FATURAMENTO":
+        return (
+            df.groupby("Grupo Faturamento", as_index=False)
+            .agg({
+                "Pedido": "nunique",
+                "Item": "nunique",
+                "Saldo a Faturar": "sum",
+                "Valor em Carteira": "sum",
+            })
+            .rename(columns={
+                "Pedido": "Qtd. Pedidos",
+                "Item": "Qtd. Itens",
+                "Saldo a Faturar": "Qtde",
+                "Valor em Carteira": "Valor",
+            })
+            .sort_values("Valor", ascending=False)
+        )
 
-    return df.copy()
+    if tipo_normalizado == "POR PREVISAO DE FATURAMENTO":
+        return (
+            df.groupby("Data Entrega", as_index=False)
+            .agg({
+                "Pedido": "nunique",
+                "Item": "nunique",
+                "Saldo a Faturar": "sum",
+                "Valor em Carteira": "sum",
+            })
+            .rename(columns={
+                "Pedido": "Qtd. Pedidos",
+                "Item": "Qtd. Itens",
+                "Saldo a Faturar": "Qtde",
+                "Valor em Carteira": "Valor",
+            })
+            .sort_values("Data Entrega", ascending=True)
+        )
+
+    return pd.DataFrame()

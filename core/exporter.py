@@ -1,7 +1,9 @@
+from datetime import datetime
+
 import pandas as pd
 
 from core.carteira_processor import obter_consolidacao
-from core.formatters import formatar_moeda, formatar_numero
+from core.formatters import formatar_numero
 
 
 def exportar_excel_completo(caminho, state):
@@ -9,65 +11,17 @@ def exportar_excel_completo(caminho, state):
         raise ValueError("Nenhum arquivo importado.")
 
     with pd.ExcelWriter(caminho, engine="openpyxl") as writer:
-        state.gerar_df_prog2().to_excel(
-            writer,
-            sheet_name="PROG 2",
-            index=False
-        )
+        state.gerar_df_prog2().to_excel(writer, sheet_name="PROG 2", index=False)
+        state.gerar_df_pedidos_ajustados().to_excel(writer, sheet_name="Pedidos Ajustados", index=False)
+        state.gerar_df_pedidos_liberados().to_excel(writer, sheet_name="Pedidos Liberados", index=False)
+        state.gerar_df_bloqueios().to_excel(writer, sheet_name="Bloqueios", index=False)
+        state.gerar_df_carteira_com_bloqueios().to_excel(writer, sheet_name="Carteira Detalhada", index=False)
 
-        state.gerar_df_pedidos_ajustados().to_excel(
-            writer,
-            sheet_name="Pedidos Ajustados",
-            index=False
-        )
-
-        state.gerar_df_pedidos_liberados().to_excel(
-            writer,
-            sheet_name="Pedidos Liberados",
-            index=False
-        )
-
-        state.gerar_df_bloqueios().to_excel(
-            writer,
-            sheet_name="Bloqueios",
-            index=False
-        )
-
-        state.gerar_df_carteira_com_bloqueios().to_excel(
-            writer,
-            sheet_name="Carteira Detalhada",
-            index=False
-        )
-
-        obter_consolidacao(state.df_original, "Por Item").to_excel(
-            writer,
-            sheet_name="Por Item",
-            index=False
-        )
-
-        obter_consolidacao(state.df_original, "Por Pedido").to_excel(
-            writer,
-            sheet_name="Por Pedido",
-            index=False
-        )
-
-        obter_consolidacao(state.df_original, "Por Cliente").to_excel(
-            writer,
-            sheet_name="Por Cliente",
-            index=False
-        )
-
-        obter_consolidacao(state.df_original, "Por Grupo de Faturamento").to_excel(
-            writer,
-            sheet_name="Por Grupo",
-            index=False
-        )
-
-        obter_consolidacao(state.df_original, "Por Previsão de Faturamento").to_excel(
-            writer,
-            sheet_name="Por Previsao",
-            index=False
-        )
+        obter_consolidacao(state.df_original, "Por Item").to_excel(writer, sheet_name="Por Item", index=False)
+        obter_consolidacao(state.df_original, "Por Pedido").to_excel(writer, sheet_name="Por Pedido", index=False)
+        obter_consolidacao(state.df_original, "Por Cliente").to_excel(writer, sheet_name="Por Cliente", index=False)
+        obter_consolidacao(state.df_original, "Por Grupo de Faturamento").to_excel(writer, sheet_name="Por Grupo", index=False)
+        obter_consolidacao(state.df_original, "Por Previsão de Faturamento").to_excel(writer, sheet_name="Por Previsao", index=False)
 
 
 def exportar_csv(caminho, df):
@@ -232,18 +186,10 @@ def formatar_valor_pdf(valor, coluna):
     if pd.isna(valor):
         return ""
 
-    coluna_normalizada = str(coluna).upper()
-
     if isinstance(valor, float):
-        if "VLR" in coluna_normalizada or "VALOR" in coluna_normalizada:
-            return formatar_moeda(valor).replace("R$", "").strip()
-
         return formatar_numero(valor)
 
     if isinstance(valor, int):
-        if "VLR" in coluna_normalizada or "VALOR" in coluna_normalizada:
-            return formatar_moeda(valor).replace("R$", "").strip()
-
         return str(valor)
 
     return str(valor)
@@ -253,13 +199,13 @@ def peso_coluna_pdf(coluna):
     coluna_normalizada = str(coluna).upper()
 
     if coluna_normalizada == "ITEM":
-        return 1.15
+        return 1.25
 
     if "DESCRICAO ITEM" in coluna_normalizada:
-        return 5.30
+        return 5.50
 
     if "DESCRICAO CLIENTE" in coluna_normalizada:
-        return 4.60
+        return 4.30
 
     if coluna_normalizada == "PEDIDO":
         return 1.10
@@ -271,7 +217,7 @@ def peso_coluna_pdf(coluna):
         return 1.10
 
     if "QTDE" in coluna_normalizada or "QTD" in coluna_normalizada:
-        return 0.90
+        return 0.95
 
     return 1.00
 
@@ -286,6 +232,40 @@ def alinhamento_coluna_pdf(coluna):
         return "CENTER"
 
     return "LEFT"
+
+
+def definir_fonte_pdf(df_pdf, titulo):
+    titulo_normalizado = str(titulo).lower()
+    quantidade_colunas = len(df_pdf.columns)
+
+    if "itens liberados do prog 2" in titulo_normalizado:
+        return 10.6, 12.6
+
+    if quantidade_colunas <= 3:
+        return 9.8, 11.8
+
+    if quantidade_colunas <= 5:
+        return 8.1, 9.8
+
+    return 7.0, 8.6
+
+
+def desenhar_rodape_pdf(canvas, doc, texto_rodape):
+    canvas.saveState()
+
+    canvas.setFont("Courier", 7)
+
+    largura_pagina, _ = doc.pagesize
+
+    y_rodape = 0.45 * 28.3464567
+
+    canvas.drawRightString(
+        largura_pagina - doc.rightMargin,
+        y_rodape,
+        texto_rodape
+    )
+
+    canvas.restoreState()
 
 
 def exportar_dataframe_pdf(caminho, df, titulo="Relatório"):
@@ -305,6 +285,8 @@ def exportar_dataframe_pdf(caminho, df, titulo="Relatório"):
         ) from erro
 
     df_pdf = preparar_dataframe_pdf(df, titulo)
+    data_geracao = datetime.now().strftime("%d/%m/%Y %H:%M")
+    texto_rodape = f"Gerado em: {data_geracao}"
 
     estilos = getSampleStyleSheet()
 
@@ -313,22 +295,12 @@ def exportar_dataframe_pdf(caminho, df, titulo="Relatório"):
         parent=estilos["Title"],
         alignment=TA_CENTER,
         fontName="Courier-Bold",
-        fontSize=14,
-        leading=17,
-        spaceAfter=10,
+        fontSize=15,
+        leading=18,
+        spaceAfter=5,
     )
 
-    quantidade_colunas = len(df_pdf.columns)
-
-    if quantidade_colunas <= 3:
-        fonte_tabela = 8.5
-        leading_tabela = 10.5
-    elif quantidade_colunas <= 5:
-        fonte_tabela = 7.2
-        leading_tabela = 8.8
-    else:
-        fonte_tabela = 6.2
-        leading_tabela = 7.8
+    fonte_tabela, leading_tabela = definir_fonte_pdf(df_pdf, titulo)
 
     estilo_texto = ParagraphStyle(
         "TextoTabela",
@@ -349,15 +321,15 @@ def exportar_dataframe_pdf(caminho, df, titulo="Relatório"):
     documento = SimpleDocTemplate(
         caminho,
         pagesize=A4,
-        rightMargin=0.8 * cm,
-        leftMargin=0.8 * cm,
-        topMargin=1.0 * cm,
-        bottomMargin=0.8 * cm,
+        rightMargin=0.6 * cm,
+        leftMargin=0.6 * cm,
+        topMargin=0.9 * cm,
+        bottomMargin=1.0 * cm,
     )
 
     elementos = [
         Paragraph(titulo_pdf_formatado(titulo), estilo_titulo),
-        Spacer(1, 0.10 * cm),
+        Spacer(1, 0.12 * cm),
     ]
 
     colunas = list(df_pdf.columns)
@@ -372,7 +344,7 @@ def exportar_dataframe_pdf(caminho, df, titulo="Relatório"):
             for coluna in colunas
         ])
 
-    largura_total = A4[0] - (1.6 * cm)
+    largura_total = A4[0] - (1.2 * cm)
 
     pesos = [
         peso_coluna_pdf(coluna)
@@ -418,4 +390,8 @@ def exportar_dataframe_pdf(caminho, df, titulo="Relatório"):
 
     elementos.append(tabela)
 
-    documento.build(elementos)
+    documento.build(
+        elementos,
+        onFirstPage=lambda canvas, doc: desenhar_rodape_pdf(canvas, doc, texto_rodape),
+        onLaterPages=lambda canvas, doc: desenhar_rodape_pdf(canvas, doc, texto_rodape),
+    )

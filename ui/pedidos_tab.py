@@ -13,6 +13,8 @@ class PedidosTab:
 
         self.busca_var = tk.StringVar()
         self.valor_minimo_var = tk.StringVar(value="1000")
+        self.filtro_status_var = tk.StringVar(value="Todos")
+        self.filtro_grupo_var = tk.StringVar(value="Todos")
         self.item_global_var = tk.StringVar()
 
         self.mapa_linhas = {}
@@ -24,7 +26,7 @@ class PedidosTab:
         self.criar_interface()
 
     def criar_interface(self):
-        container = ttk.Frame(self.parent, padding=(6, 5))
+        container = ttk.Frame(self.parent, padding=(8, 6))
         container.pack(fill="both", expand=True)
 
         self.criar_painel_acoes(container)
@@ -32,55 +34,103 @@ class PedidosTab:
 
     def criar_painel_acoes(self, parent):
         painel = ttk.Frame(parent)
-        painel.pack(fill="x", pady=(0, 5))
+        painel.pack(fill="x", pady=(0, 6))
 
+        self.criar_area_filtros(painel)
+        self.criar_area_acoes(painel)
+
+    def criar_area_filtros(self, parent):
         frame_filtros = ttk.LabelFrame(
-            painel,
+            parent,
             text="Filtros da carteira",
-            padding=(6, 4),
+            padding=(8, 6),
             style="Section.TLabelframe"
         )
-        frame_filtros.pack(fill="x", pady=(0, 4))
+        frame_filtros.pack(fill="x", pady=(0, 5))
 
-        ttk.Label(frame_filtros, text="Buscar:").grid(
+        ttk.Label(frame_filtros, text="Busca geral").grid(
             row=0,
             column=0,
             sticky="w",
-            padx=(0, 4)
+            padx=(0, 5)
         )
 
         entrada_busca = ttk.Entry(
             frame_filtros,
             textvariable=self.busca_var,
-            width=36
+            width=34
         )
         entrada_busca.grid(
             row=0,
             column=1,
             sticky="w",
-            padx=(0, 10)
+            padx=(0, 14)
         )
         entrada_busca.bind("<KeyRelease>", lambda event: self.refresh())
 
-        ttk.Label(frame_filtros, text="Valor mínimo liberado:").grid(
+        ttk.Label(frame_filtros, text="Valor mín. liberado").grid(
             row=0,
             column=2,
             sticky="w",
-            padx=(0, 4)
+            padx=(0, 5)
         )
 
         entrada_valor = ttk.Entry(
             frame_filtros,
             textvariable=self.valor_minimo_var,
-            width=13
+            width=12
         )
         entrada_valor.grid(
             row=0,
             column=3,
             sticky="w",
-            padx=(0, 10)
+            padx=(0, 14)
         )
         entrada_valor.bind("<KeyRelease>", lambda event: self.controller.refresh_pedidos())
+
+        ttk.Label(frame_filtros, text="Status").grid(
+            row=0,
+            column=4,
+            sticky="w",
+            padx=(0, 5)
+        )
+
+        combo_status = ttk.Combobox(
+            frame_filtros,
+            textvariable=self.filtro_status_var,
+            values=["Todos", "Liberados", "Parciais", "Bloqueados"],
+            state="readonly",
+            width=13
+        )
+        combo_status.grid(
+            row=0,
+            column=5,
+            sticky="w",
+            padx=(0, 14)
+        )
+        combo_status.bind("<<ComboboxSelected>>", lambda event: self.refresh())
+
+        ttk.Label(frame_filtros, text="Grupo").grid(
+            row=0,
+            column=6,
+            sticky="w",
+            padx=(0, 5)
+        )
+
+        combo_grupo = ttk.Combobox(
+            frame_filtros,
+            textvariable=self.filtro_grupo_var,
+            values=["Todos", "I", "P"],
+            state="readonly",
+            width=8
+        )
+        combo_grupo.grid(
+            row=0,
+            column=7,
+            sticky="w",
+            padx=(0, 14)
+        )
+        combo_grupo.bind("<<ComboboxSelected>>", lambda event: self.refresh())
 
         ttk.Button(
             frame_filtros,
@@ -88,117 +138,154 @@ class PedidosTab:
             command=self.limpar_filtros
         ).grid(
             row=0,
-            column=4,
-            sticky="w"
+            column=8,
+            sticky="w",
+            padx=(0, 10)
         )
 
         ttk.Label(
             frame_filtros,
-            text="Clique no cabeçalho Valor Liberado para ordenar.",
+            text="Dica: clique no cabeçalho Vlr Lib. para alternar entre maior e menor valor.",
             style="Hint.TLabel"
         ).grid(
-            row=0,
-            column=5,
+            row=1,
+            column=0,
+            columnspan=9,
             sticky="w",
-            padx=(14, 0)
+            pady=(6, 0)
         )
 
-        frame_filtros.columnconfigure(6, weight=1)
+        frame_filtros.columnconfigure(9, weight=1)
 
+    def criar_area_acoes(self, parent):
         frame_acoes = ttk.LabelFrame(
-            painel,
+            parent,
             text="Ações rápidas",
-            padding=(6, 4),
+            padding=(8, 6),
             style="Section.TLabelframe"
         )
         frame_acoes.pack(fill="x")
 
-        bloco_bloqueios = ttk.Frame(frame_acoes)
-        bloco_bloqueios.grid(row=0, column=0, sticky="w")
+        grupo_bloqueios = ttk.LabelFrame(
+            frame_acoes,
+            text="Bloqueios",
+            padding=(6, 5),
+            style="Action.TLabelframe"
+        )
+        grupo_bloqueios.grid(row=0, column=0, sticky="nw", padx=(0, 8))
 
         ttk.Button(
-            bloco_bloqueios,
+            grupo_bloqueios,
             text="Bloquear item",
             command=self.controller.bloquear_item_selecionado
-        ).pack(side="left", padx=(0, 4))
+        ).grid(row=0, column=0, sticky="w", padx=2, pady=2)
 
         ttk.Button(
-            bloco_bloqueios,
+            grupo_bloqueios,
             text="Bloquear pedido",
             command=self.controller.bloquear_pedido_selecionado
-        ).pack(side="left", padx=4)
+        ).grid(row=0, column=1, sticky="w", padx=2, pady=2)
 
         ttk.Button(
-            bloco_bloqueios,
-            text="Itens",
-            command=self.controller.abrir_janela_bloqueio_item
-        ).pack(side="left", padx=4)
-
-        ttk.Button(
-            bloco_bloqueios,
-            text="Clientes",
-            command=self.controller.abrir_janela_bloqueio_cliente
-        ).pack(side="left", padx=4)
-
-        ttk.Button(
-            bloco_bloqueios,
-            text="Observação",
-            command=self.controller.abrir_janela_bloqueio_observacao
-        ).pack(side="left", padx=4)
-
-        ttk.Button(
-            bloco_bloqueios,
+            grupo_bloqueios,
             text="Liberar seleção",
             command=self.controller.liberar_selecao_pedidos
-        ).pack(side="left", padx=(4, 12))
-
-        bloco_prog2 = ttk.Frame(frame_acoes)
-        bloco_prog2.grid(row=0, column=1, sticky="w")
+        ).grid(row=0, column=2, sticky="w", padx=2, pady=2)
 
         ttk.Button(
-            bloco_prog2,
+            grupo_bloqueios,
+            text="Por item",
+            command=self.controller.abrir_janela_bloqueio_item
+        ).grid(row=1, column=0, sticky="w", padx=2, pady=2)
+
+        ttk.Button(
+            grupo_bloqueios,
+            text="Por cliente",
+            command=self.controller.abrir_janela_bloqueio_cliente
+        ).grid(row=1, column=1, sticky="w", padx=2, pady=2)
+
+        ttk.Button(
+            grupo_bloqueios,
+            text="Por observação",
+            command=self.controller.abrir_janela_bloqueio_observacao
+        ).grid(row=1, column=2, sticky="w", padx=2, pady=2)
+
+        grupo_programacao = ttk.LabelFrame(
+            frame_acoes,
+            text="Programação",
+            padding=(6, 5),
+            style="Action.TLabelframe"
+        )
+        grupo_programacao.grid(row=0, column=1, sticky="nw", padx=(0, 8))
+
+        ttk.Button(
+            grupo_programacao,
             text="Adicionar ao PROG 2",
             command=self.controller.adicionar_pedido_selecionado_prog2,
             style="Primary.TButton"
-        ).pack(side="left", padx=(0, 10))
+        ).grid(row=0, column=0, sticky="w", padx=2, pady=2)
 
-        ttk.Label(bloco_prog2, text="Item global:").pack(side="left", padx=(0, 4))
+        ttk.Label(
+            grupo_programacao,
+            text="Selecione um pedido ou item na carteira.",
+            style="CardHint.TLabel"
+        ).grid(row=1, column=0, sticky="w", padx=2, pady=(4, 2))
+
+        grupo_item_global = ttk.LabelFrame(
+            frame_acoes,
+            text="Item global",
+            padding=(6, 5),
+            style="Action.TLabelframe"
+        )
+        grupo_item_global.grid(row=0, column=2, sticky="nw")
+
+        ttk.Label(
+            grupo_item_global,
+            text="Código:",
+            style="Card.TLabel"
+        ).grid(row=0, column=0, sticky="w", padx=(2, 4), pady=2)
 
         ttk.Entry(
-            bloco_prog2,
+            grupo_item_global,
             textvariable=self.item_global_var,
-            width=12
-        ).pack(side="left", padx=(0, 4))
+            width=14
+        ).grid(row=0, column=1, sticky="w", padx=2, pady=2)
 
         ttk.Button(
-            bloco_prog2,
-            text="Bloq. global",
+            grupo_item_global,
+            text="Bloquear",
             command=self.controller.bloquear_item_global
-        ).pack(side="left", padx=4)
+        ).grid(row=0, column=2, sticky="w", padx=2, pady=2)
 
         ttk.Button(
-            bloco_prog2,
-            text="Lib. global",
+            grupo_item_global,
+            text="Liberar",
             command=self.controller.liberar_item_global
-        ).pack(side="left", padx=4)
+        ).grid(row=0, column=3, sticky="w", padx=2, pady=2)
 
-        frame_acoes.columnconfigure(2, weight=1)
+        ttk.Label(
+            grupo_item_global,
+            text="Aplica o código em toda a carteira.",
+            style="CardHint.TLabel"
+        ).grid(row=1, column=0, columnspan=4, sticky="w", padx=2, pady=(4, 2))
+
+        frame_acoes.columnconfigure(3, weight=1)
 
     def criar_tabela(self, parent):
         frame_tabela = ttk.LabelFrame(
             parent,
             text="Carteira de pedidos",
-            padding=(6, 5),
+            padding=(8, 6),
             style="Section.TLabelframe"
         )
         frame_tabela.pack(fill="both", expand=True)
 
         barra_tabela = ttk.Frame(frame_tabela)
-        barra_tabela.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 5))
+        barra_tabela.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
 
         ttk.Label(
             barra_tabela,
-            text="Pedidos e itens em aberto",
+            text="Indicadores: ✓ liberado | ⚠ parcial | ✕ bloqueado",
             style="Subtitle.TLabel"
         ).pack(side="left")
 
@@ -323,6 +410,41 @@ class PedidosTab:
             command=self.alternar_ordenacao_valor_liberado
         )
 
+    def status_pedido(self, pedido_str, valor_original, valor_bloqueado):
+        if pedido_str in self.state.pedidos_bloqueados:
+            return "bloqueado", "✕ Pedido bloqueado", ("pedido", "pedido_bloqueado")
+
+        if self.state.pedido_bloqueado_por_cliente(pedido_str):
+            return "bloqueado", "✕ Cliente bloqueado", ("pedido", "pedido_bloqueado")
+
+        if self.state.pedido_bloqueado_por_observacao(pedido_str):
+            return "bloqueado", "✕ Observação bloqueada", ("pedido", "pedido_bloqueado")
+
+        if valor_original > 0 and valor_bloqueado >= valor_original:
+            return "bloqueado", "✕ Total bloqueado", ("pedido", "pedido_bloqueado")
+
+        if valor_bloqueado > 0:
+            return "parcial", "⚠ Parcial", ("pedido", "pedido_parcial")
+
+        return "liberado", "✓ Liberado", ("pedido", "pedido_liberado")
+
+    def pedido_passa_filtro_status(self, status_chave):
+        filtro = self.filtro_status_var.get()
+
+        if filtro == "Todos":
+            return True
+
+        if filtro == "Liberados":
+            return status_chave == "liberado"
+
+        if filtro == "Parciais":
+            return status_chave == "parcial"
+
+        if filtro == "Bloqueados":
+            return status_chave == "bloqueado"
+
+        return True
+
     def refresh(self):
         self.tabela.delete(*self.tabela.get_children())
         self.mapa_linhas.clear()
@@ -335,6 +457,7 @@ class PedidosTab:
         df = self.state.df_aberto()
         termo = self.busca_var.get().strip().lower()
         valor_minimo = converter_valor_digitado(self.valor_minimo_var.get())
+        filtro_grupo = self.filtro_grupo_var.get()
 
         if termo:
             df = df[
@@ -346,6 +469,9 @@ class PedidosTab:
                 )
             ]
 
+        if filtro_grupo in {"I", "P"}:
+            df = df[df["Grupo Faturamento Abrev"].astype(str) == filtro_grupo]
+
         df = self.state.df_com_bloqueios(df)
 
         pedidos_processados = []
@@ -354,19 +480,29 @@ class PedidosTab:
             valor_original = grupo["Valor em Carteira"].sum()
             valor_bloqueado = grupo["_Valor Bloqueado"].sum()
             valor_liberado = grupo["_Valor Liberado"].sum()
+            pedido_str = str(pedido)
 
             if valor_liberado < valor_minimo:
                 continue
 
-            pedidos_processados.append(
-                {
-                    "pedido": pedido,
-                    "grupo": grupo,
-                    "valor_original": valor_original,
-                    "valor_bloqueado": valor_bloqueado,
-                    "valor_liberado": valor_liberado,
-                }
+            status_chave, status_texto, tags = self.status_pedido(
+                pedido_str,
+                valor_original,
+                valor_bloqueado
             )
+
+            if not self.pedido_passa_filtro_status(status_chave):
+                continue
+
+            pedidos_processados.append({
+                "pedido": pedido,
+                "grupo": grupo,
+                "valor_original": valor_original,
+                "valor_bloqueado": valor_bloqueado,
+                "valor_liberado": valor_liberado,
+                "status_texto": status_texto,
+                "tags": tags,
+            })
 
         if self.ordenar_por_valor_liberado:
             pedidos_processados.sort(
@@ -383,31 +519,14 @@ class PedidosTab:
             valor_original = dados["valor_original"]
             valor_bloqueado = dados["valor_bloqueado"]
             valor_liberado = dados["valor_liberado"]
+            status_texto = dados["status_texto"]
+            tags = dados["tags"]
 
             pedido_str = str(pedido)
             cliente = self.state.abreviar_cliente(grupo["Cliente"].iloc[0])
             qtde_saldo = grupo["Saldo a Faturar"].sum()
             data_entrega = str(grupo["Data Entrega"].iloc[0])
             grupo_faturamento = str(grupo["Grupo Faturamento Abrev"].iloc[0])
-
-            if pedido_str in self.state.pedidos_bloqueados:
-                status = "Pedido bloqueado"
-                tags = ("pedido", "pedido_bloqueado")
-            elif self.state.pedido_bloqueado_por_cliente(pedido_str):
-                status = "Bloqueado por cliente"
-                tags = ("pedido", "pedido_bloqueado")
-            elif self.state.pedido_bloqueado_por_observacao(pedido_str):
-                status = "Bloqueado por observação"
-                tags = ("pedido", "pedido_bloqueado")
-            elif valor_original > 0 and valor_bloqueado >= valor_original:
-                status = "Totalmente bloqueado"
-                tags = ("pedido", "pedido_bloqueado")
-            elif valor_bloqueado > 0:
-                status = "Parcialmente bloqueado"
-                tags = ("pedido", "pedido_parcial")
-            else:
-                status = "Liberado"
-                tags = ("pedido",)
 
             iid_pedido = f"pedido_{indice}"
 
@@ -424,7 +543,7 @@ class PedidosTab:
                     formatar_moeda(valor_liberado),
                     data_entrega,
                     grupo_faturamento,
-                    status,
+                    status_texto,
                 ),
                 open=True,
                 tags=tags,
@@ -435,13 +554,10 @@ class PedidosTab:
             for _, linha in grupo.iterrows():
                 id_linha = int(linha["ID Linha"])
                 bloqueado = bool(linha["_Bloqueado"])
-                valor_item = float(linha["Valor em Carteira"])
-                valor_item_bloqueado = float(linha["_Valor Bloqueado"])
-                valor_item_liberado = float(linha["_Valor Liberado"])
 
                 iid_item = f"item_{id_linha}"
                 texto_item = f'   {linha["Item"]} - {linha["Descrição Item"]}'
-                status_item = linha["_Tipo Bloqueio"] if bloqueado else "Liberado"
+                status_item = f'✕ {linha["_Tipo Bloqueio"]}' if bloqueado else "✓ Liberado"
 
                 self.tabela.insert(
                     iid_pedido,
@@ -451,9 +567,9 @@ class PedidosTab:
                     values=(
                         "",
                         formatar_numero(linha["Saldo a Faturar"]),
-                        formatar_moeda(valor_item),
-                        formatar_moeda(valor_item_bloqueado),
-                        formatar_moeda(valor_item_liberado),
+                        formatar_moeda(float(linha["Valor em Carteira"])),
+                        formatar_moeda(float(linha["_Valor Bloqueado"])),
+                        formatar_moeda(float(linha["_Valor Liberado"])),
                         "",
                         "",
                         status_item,
@@ -533,6 +649,8 @@ class PedidosTab:
     def limpar_filtros(self):
         self.busca_var.set("")
         self.valor_minimo_var.set("1000")
+        self.filtro_status_var.set("Todos")
+        self.filtro_grupo_var.set("Todos")
         self.controller.refresh_pedidos()
 
     def expandir_todos(self):

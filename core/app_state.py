@@ -401,14 +401,6 @@ class AppState:
                 "valor_liberado": 0,
             }
 
-        df = self.df_com_bloqueios(self.df_aberto())
-
-        total_pedidos = 0
-        total_itens = 0
-        valor_total = 0
-        valor_bloqueado = 0
-        valor_liberado = 0
-
         pedidos_prog2 = set(str(pedido) for pedido in self.pedidos_prog2)
 
         if not pedidos_prog2:
@@ -420,21 +412,24 @@ class AppState:
                 "valor_liberado": 0,
             }
 
+        df = self.df_com_bloqueios(self.df_aberto())
         df = df[df["Pedido Texto"].isin(pedidos_prog2)]
 
-        for pedido, grupo in df.groupby("Pedido Texto", sort=False):
-            total_pedidos += 1
-            total_itens += len(grupo)
-            valor_total += grupo["Valor em Carteira"].sum()
-            valor_bloqueado += grupo["_Valor Bloqueado"].sum()
-            valor_liberado += grupo["_Valor Liberado"].sum()
+        if df.empty:
+            return {
+                "pedidos": 0,
+                "itens": 0,
+                "valor_total": 0,
+                "valor_bloqueado": 0,
+                "valor_liberado": 0,
+            }
 
         return {
-            "pedidos": total_pedidos,
-            "itens": total_itens,
-            "valor_total": valor_total,
-            "valor_bloqueado": valor_bloqueado,
-            "valor_liberado": valor_liberado,
+            "pedidos": df["Pedido Texto"].nunique(),
+            "itens": len(df),
+            "valor_total": df["Valor em Carteira"].sum(),
+            "valor_bloqueado": df["_Valor Bloqueado"].sum(),
+            "valor_liberado": df["_Valor Liberado"].sum(),
         }
 
     def obter_observacoes_disponiveis(self):
@@ -521,8 +516,8 @@ class AppState:
                 "descricao": descricao,
                 "pedidos": grupo["Pedido"].nunique(),
                 "clientes": grupo["Cliente"].nunique(),
-                "linhas": len(group := grupo),
-                "valor": group["Valor em Carteira"].sum(),
+                "qtde_total": grupo["Saldo a Faturar"].sum(),
+                "valor": grupo["Valor em Carteira"].sum(),
             })
 
         registros.sort(key=lambda item: item["item"])
@@ -650,7 +645,7 @@ class AppState:
             cliente_abrev = self.abreviar_cliente(cliente_original)
             valor_original = grupo["Valor em Carteira"].sum()
             valor_bloqueado = grupo["_Valor Bloqueado"].sum()
-            valor_liberado = group_liberado = grupo["_Valor Liberado"].sum()
+            valor_liberado = grupo["_Valor Liberado"].sum()
             pedido_str = str(pedido)
 
             if pedido_str in self.pedidos_bloqueados:
@@ -674,7 +669,7 @@ class AppState:
                 "Qtde Saldo": grupo["Saldo a Faturar"].sum(),
                 "Valor Original Pedido": valor_original,
                 "Valor Bloqueado": valor_bloqueado,
-                "Valor Liberado Pedido": group_liberado,
+                "Valor Liberado Pedido": valor_liberado,
                 "Status Bloqueio": status,
             })
 

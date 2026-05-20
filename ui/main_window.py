@@ -1,6 +1,10 @@
 import os
+import subprocess
 import tempfile
+import traceback
 import webbrowser
+from datetime import datetime
+from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
@@ -14,7 +18,7 @@ from core.exporter import (
     exportar_dataframe_excel,
     exportar_dataframe_pdf,
 )
-from core.formatters import formatar_moeda
+from core.formatters import formatar_moeda, formatar_numero
 from ui.styles import configurar_estilo
 from ui.pedidos_tab import PedidosTab
 from ui.prog2_tab import Prog2Tab
@@ -26,7 +30,7 @@ from ui.consolidacoes_tab import ConsolidacoesTab
 class MainWindow:
     def __init__(self, root):
         self.root = root
-        self.root.title("Consolidador de Carteira de Pedidos")
+        self.root.title("Carteira Manager")
         self.root.geometry("1500x860")
         self.root.minsize(1180, 700)
 
@@ -34,6 +38,11 @@ class MainWindow:
 
         self.state = AppState()
         self.labels_resumo = {}
+        self.ultimo_arquivo_importado = None
+
+        self.log_dir = Path.home() / ".carteira_ops" / "logs"
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+        self.log_path = self.log_dir / "app.log"
 
         self.criar_interface()
 
@@ -44,56 +53,66 @@ class MainWindow:
         self.criar_barra_status()
 
     def criar_topo(self):
-        frame = ttk.Frame(self.root, padding=(8, 6))
+        frame = ttk.Frame(self.root, padding=(10, 7), style="TopBar.TFrame")
         frame.pack(fill="x")
 
-        bloco_titulo = ttk.Frame(frame)
+        bloco_titulo = ttk.Frame(frame, style="TopBar.TFrame")
         bloco_titulo.pack(side="left", fill="x", expand=True)
 
-        titulo = ttk.Label(
+        ttk.Label(
             bloco_titulo,
-            text="Consolidador de Carteira de Pedidos",
-            style="Title.TLabel"
-        )
-        titulo.pack(anchor="w")
+            text="Carteira Manager",
+            style="TopBarTitle.TLabel",
+        ).pack(anchor="w")
 
-        subtitulo = ttk.Label(
-            bloco_titulo,
-            text="Importe a carteira, bloqueie pedidos/itens/clientes e monte a programação PROG 2.",
-            style="Subtitle.TLabel"
-        )
-        subtitulo.pack(anchor="w", pady=(1, 0))
 
-        bloco_botoes = ttk.Frame(frame)
-        bloco_botoes.pack(side="right")
+        bloco_menus = ttk.Frame(frame, style="TopBar.TFrame")
+        bloco_menus.pack(side="right")
 
-        ttk.Button(
-            bloco_botoes,
-            text="Importar CSV",
-            command=self.importar_csv,
-            style="Primary.TButton"
-        ).pack(side="left", padx=3)
+        self.criar_menu_arquivo(bloco_menus)
+        self.criar_menu_exportacao(bloco_menus)
+        self.criar_menu_suporte(bloco_menus)
 
-        ttk.Button(
-            bloco_botoes,
-            text="Exportar Excel",
-            command=self.exportar_excel
-        ).pack(side="left", padx=3)
+    def criar_menu_arquivo(self, parent):
+        botao = ttk.Menubutton(parent, text="Arquivo ▾")
+        menu = tk.Menu(botao, tearoff=0)
 
-        ttk.Button(
-            bloco_botoes,
-            text="Exportar CSV",
-            command=self.exportar_csv_atual
-        ).pack(side="left", padx=3)
+        menu.add_command(label="Importar CSV", command=self.importar_csv)
+        menu.add_command(label="Recarregar último CSV", command=self.recarregar_ultimo_csv)
+        menu.add_separator()
+        menu.add_command(label="Sair", command=self.root.destroy)
+
+        botao["menu"] = menu
+        botao.pack(side="left", padx=3)
+
+    def criar_menu_exportacao(self, parent):
+        botao = ttk.Menubutton(parent, text="Exportações ▾")
+        menu = tk.Menu(botao, tearoff=0)
+
+        menu.add_command(label="Exportar relatório completo em Excel", command=self.exportar_excel)
+        menu.add_command(label="Exportar aba atual em CSV", command=self.exportar_csv_atual)
+
+        botao["menu"] = menu
+        botao.pack(side="left", padx=3)
+
+    def criar_menu_suporte(self, parent):
+        botao = ttk.Menubutton(parent, text="Suporte ▾")
+        menu = tk.Menu(botao, tearoff=0)
+
+        menu.add_command(label="Abrir arquivo de log", command=self.abrir_log)
+        menu.add_command(label="Sobre", command=self.mostrar_sobre)
+
+        botao["menu"] = menu
+        botao.pack(side="left", padx=3)
 
     def criar_resumo(self):
         frame = ttk.LabelFrame(
             self.root,
             text="Resumo geral",
             padding=(6, 3),
-            style="Summary.TLabelframe"
+            style="Kpi.TLabelframe"
         )
-        frame.pack(fill="x", padx=8, pady=(0, 5))
+        frame.pack(fill="x", padx=8, pady=(6, 5))
 
         campos = [
             "Pedidos Abertos",
@@ -114,13 +133,13 @@ class MainWindow:
             ttk.Label(
                 bloco,
                 text=campo,
-                style="SummaryTitle.TLabel"
+                style="KpiTitle.TLabel"
             ).pack(anchor="center")
 
             label_valor = ttk.Label(
                 bloco,
                 text="-",
-                style="SummaryValue.TLabel"
+                style="KpiValue.TLabel"
             )
             label_valor.pack(anchor="center", pady=(1, 0))
 
@@ -164,6 +183,41 @@ class MainWindow:
     def set_status(self, texto):
         self.status.config(text=texto)
 
+    def registrar_erro(self, contexto, erro):
+        data = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+
+        with open(self.log_path, "a", encoding="utf-8") as arquivo:
+            arquivo.write("\n" + "=" * 80 + "\n")
+            arquivo.write(f"{data} | {contexto}\n")
+            arquivo.write("-" * 80 + "\n")
+            arquivo.write(str(erro) + "\n")
+            arquivo.write(traceback.format_exc())
+            arquivo.write("\n")
+
+    def abrir_log(self):
+        if not self.log_path.exists():
+            self.log_path.write_text("Nenhum erro registrado até o momento.\n", encoding="utf-8")
+
+        self.abrir_arquivo(str(self.log_path))
+
+    def mostrar_sobre(self):
+        messagebox.showinfo(
+            "Sobre",
+            "CarteiraOps\n\n"
+            "Aplicativo desktop para consolidação, bloqueio e programação de carteira de pedidos.\n\n"
+            f"Log local:\n{self.log_path}"
+        )
+
+    def abrir_arquivo(self, caminho):
+        try:
+            if os.name == "nt":
+                os.startfile(caminho)
+            else:
+                subprocess.Popen(["xdg-open", caminho])
+        except Exception:
+            caminho_url = os.path.abspath(caminho).replace(os.sep, "/")
+            webbrowser.open(f"file:///{caminho_url}")
+
     def importar_csv(self):
         caminho = filedialog.askopenfilename(
             title="Selecione o arquivo CSV da carteira",
@@ -176,23 +230,51 @@ class MainWindow:
         if not caminho:
             return
 
+        self.carregar_arquivo_csv(caminho)
+
+    def recarregar_ultimo_csv(self):
+        if not self.ultimo_arquivo_importado:
+            messagebox.showwarning(
+                "Nenhum arquivo anterior",
+                "Ainda não existe um CSV carregado nesta sessão."
+            )
+            return
+
+        if not os.path.exists(self.ultimo_arquivo_importado):
+            messagebox.showerror(
+                "Arquivo não encontrado",
+                f"O último arquivo importado não existe mais:\n{self.ultimo_arquivo_importado}"
+            )
+            return
+
+        self.carregar_arquivo_csv(self.ultimo_arquivo_importado)
+
+    def carregar_arquivo_csv(self, caminho):
         try:
-            self.set_status("Importando arquivo...")
+            self.set_status("Importando e validando arquivo...")
             self.root.update_idletasks()
 
             df = carregar_carteira(caminho)
             self.state.carregar_dataframe(df)
+            self.ultimo_arquivo_importado = caminho
 
             self.refresh_all()
 
-            self.set_status(f"Arquivo importado com sucesso: {caminho}")
+            self.set_status(
+                f"Arquivo importado com sucesso: {caminho} | "
+                f"Linhas: {len(df)} | "
+                f"Pedidos: {df['Pedido'].nunique()}"
+            )
 
         except Exception as erro:
+            self.registrar_erro("Erro ao importar CSV", erro)
+
             messagebox.showerror(
                 "Erro ao importar arquivo",
                 str(erro)
             )
-            self.set_status("Erro ao importar arquivo.")
+
+            self.set_status("Erro ao importar arquivo. Veja o log em Suporte > Abrir arquivo de log.")
 
     def refresh_all(self):
         self.atualizar_resumo()
@@ -236,8 +318,20 @@ class MainWindow:
             "Valor liberado PROG 2": formatar_moeda(totais_prog2["valor_liberado"]),
         }
 
+        estilos = {
+            "Pedidos Bloqueados": "KpiDanger.TLabel" if len(pedidos_bloqueados_total) > 0 else "KpiValue.TLabel",
+            "Clientes Bloq.": "KpiDanger.TLabel" if len(self.state.clientes_bloqueados) > 0 else "KpiValue.TLabel",
+            "Obs. Bloqueadas": "KpiWarning.TLabel" if len(self.state.observacoes_bloqueadas) > 0 else "KpiValue.TLabel",
+            "Valor Bloqueado": "KpiDanger.TLabel" if valor_bloqueado > 0 else "KpiValue.TLabel",
+            "Valor Liberado": "KpiPositive.TLabel" if valor_liberado > 0 else "KpiValue.TLabel",
+            "Valor liberado PROG 2": "KpiPositive.TLabel" if totais_prog2["valor_liberado"] > 0 else "KpiValue.TLabel",
+        }
+
         for campo, label in self.labels_resumo.items():
-            label.config(text=str(valores.get(campo, "-")))
+            label.config(
+                text=str(valores.get(campo, "-")),
+                style=estilos.get(campo, "KpiValue.TLabel")
+            )
 
     def abrir_janela_checkbox(
         self,
@@ -254,8 +348,8 @@ class MainWindow:
     ):
         janela = tk.Toplevel(self.root)
         janela.title(titulo)
-        janela.geometry("980x580")
-        janela.minsize(760, 440)
+        janela.geometry("980x620")
+        janela.minsize(780, 460)
         janela.transient(self.root)
         janela.grab_set()
 
@@ -268,7 +362,7 @@ class MainWindow:
             for registro in registros
         }
 
-        frame_topo = ttk.Frame(janela, padding=8)
+        frame_topo = ttk.Frame(janela, padding=(10, 8))
         frame_topo.pack(fill="x")
 
         ttk.Label(
@@ -281,9 +375,9 @@ class MainWindow:
             frame_topo,
             text=subtitulo,
             style="Subtitle.TLabel"
-        ).pack(anchor="w", pady=(1, 0))
+        ).pack(anchor="w", pady=(2, 0))
 
-        frame_pesquisa = ttk.Frame(janela, padding=(8, 0, 8, 6))
+        frame_pesquisa = ttk.Frame(janela, padding=(10, 0, 10, 6))
         frame_pesquisa.pack(fill="x")
 
         ttk.Label(frame_pesquisa, text="Pesquisar:").pack(side="left", padx=(0, 5))
@@ -291,19 +385,18 @@ class MainWindow:
         entrada_busca = ttk.Entry(
             frame_pesquisa,
             textvariable=busca_var,
-            width=52
+            width=55
         )
         entrada_busca.pack(side="left", padx=(0, 10))
 
-        frame_preset = ttk.Frame(janela, padding=(8, 0, 8, 4))
+        frame_preset = ttk.Frame(janela, padding=(10, 0, 10, 4))
         frame_preset.pack(fill="x")
 
         if preset:
             preset_nome = preset["nome"]
             preset_chaves = set(preset["chaves"])
             preset_chaves_presentes = [
-                chave
-                for chave in preset_chaves
+                chave for chave in preset_chaves
                 if chave in variaveis
             ]
 
@@ -337,22 +430,42 @@ class MainWindow:
                 command=alternar_preset
             ).pack(anchor="w")
 
-        frame_acoes = ttk.Frame(janela, padding=(8, 0, 8, 6))
+        frame_acoes = ttk.Frame(janela, padding=(10, 0, 10, 6))
         frame_acoes.pack(fill="x")
 
-        frame_lista = ttk.Frame(janela, padding=(8, 0, 8, 8))
+        frame_lista = ttk.Frame(janela, padding=(10, 0, 10, 8))
         frame_lista.pack(fill="both", expand=True)
 
-        canvas = tk.Canvas(frame_lista, borderwidth=0, highlightthickness=0)
-        scroll_y = ttk.Scrollbar(frame_lista, orient="vertical", command=canvas.yview)
-        frame_checks = ttk.Frame(canvas)
-
-        frame_checks.bind(
-            "<Configure>",
-            lambda event: canvas.configure(scrollregion=canvas.bbox("all"))
+        canvas = tk.Canvas(
+            frame_lista,
+            borderwidth=0,
+            highlightthickness=1,
+            highlightbackground="#cfd4da",
+            background="#f4f6f8",
         )
 
-        canvas.create_window((0, 0), window=frame_checks, anchor="nw")
+        scroll_y = ttk.Scrollbar(
+            frame_lista,
+            orient="vertical",
+            command=canvas.yview
+        )
+
+        frame_checks = ttk.Frame(canvas)
+        canvas_window = canvas.create_window(
+            (0, 0),
+            window=frame_checks,
+            anchor="nw"
+        )
+
+        def atualizar_scroll_region(event=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def ajustar_largura_canvas(event):
+            canvas.itemconfigure(canvas_window, width=event.width)
+
+        frame_checks.bind("<Configure>", atualizar_scroll_region)
+        canvas.bind("<Configure>", ajustar_largura_canvas)
+
         canvas.configure(yscrollcommand=scroll_y.set)
 
         canvas.grid(row=0, column=0, sticky="nsew")
@@ -360,6 +473,34 @@ class MainWindow:
 
         frame_lista.rowconfigure(0, weight=1)
         frame_lista.columnconfigure(0, weight=1)
+        frame_checks.columnconfigure(0, weight=1)
+
+        def rolar_mouse(event):
+            if getattr(event, "num", None) == 4:
+                canvas.yview_scroll(-3, "units")
+            elif getattr(event, "num", None) == 5:
+                canvas.yview_scroll(3, "units")
+            else:
+                delta = int(-1 * (event.delta / 120))
+                canvas.yview_scroll(delta, "units")
+
+            return "break"
+
+        def ativar_scroll_mouse(event=None):
+            canvas.bind_all("<MouseWheel>", rolar_mouse)
+            canvas.bind_all("<Button-4>", rolar_mouse)
+            canvas.bind_all("<Button-5>", rolar_mouse)
+
+        def desativar_scroll_mouse(event=None):
+            canvas.unbind_all("<MouseWheel>")
+            canvas.unbind_all("<Button-4>")
+            canvas.unbind_all("<Button-5>")
+
+        canvas.bind("<Enter>", ativar_scroll_mouse)
+        canvas.bind("<Leave>", desativar_scroll_mouse)
+        frame_checks.bind("<Enter>", ativar_scroll_mouse)
+        frame_checks.bind("<Leave>", desativar_scroll_mouse)
+        janela.bind("<Destroy>", lambda event: desativar_scroll_mouse() if event.widget == janela else None)
 
         registros_visiveis = []
 
@@ -369,15 +510,10 @@ class MainWindow:
             if not termo:
                 return registros
 
-            filtrados = []
-
-            for registro in registros:
-                texto_busca = texto_busca_funcao(registro).lower()
-
-                if termo in texto_busca:
-                    filtrados.append(registro)
-
-            return filtrados
+            return [
+                registro for registro in registros
+                if termo in texto_busca_funcao(registro).lower()
+            ]
 
         def renderizar():
             nonlocal registros_visiveis
@@ -392,7 +528,11 @@ class MainWindow:
                     frame_checks,
                     text="Nenhum resultado encontrado.",
                     style="Subtitle.TLabel"
-                ).grid(row=0, column=0, sticky="w", padx=4, pady=4)
+                ).grid(row=0, column=0, sticky="w", padx=6, pady=6)
+
+                frame_checks.update_idletasks()
+                atualizar_scroll_region()
+                canvas.yview_moveto(0)
                 return
 
             for indice, registro in enumerate(registros_visiveis):
@@ -403,8 +543,19 @@ class MainWindow:
                     text=texto_funcao(registro),
                     variable=variaveis[chave]
                 )
-                check.grid(row=indice, column=0, sticky="w", padx=4, pady=2)
+                check.grid(
+                    row=indice,
+                    column=0,
+                    sticky="ew",
+                    padx=6,
+                    pady=2
+                )
 
+                check.bind("<Enter>", ativar_scroll_mouse)
+                check.bind("<Leave>", lambda event: None)
+
+            frame_checks.update_idletasks()
+            atualizar_scroll_region()
             canvas.yview_moveto(0)
 
         def marcar_todos():
@@ -435,13 +586,12 @@ class MainWindow:
 
         busca_var.trace_add("write", lambda *args: renderizar())
 
-        frame_botoes = ttk.Frame(janela, padding=8)
+        frame_botoes = ttk.Frame(janela, padding=(10, 8))
         frame_botoes.pack(fill="x")
 
         def confirmar_bloqueio():
             selecionados = [
-                chave
-                for chave, var in variaveis.items()
+                chave for chave, var in variaveis.items()
                 if var.get()
             ]
 
@@ -459,8 +609,7 @@ class MainWindow:
 
         def confirmar_liberacao():
             selecionados = [
-                chave
-                for chave, var in variaveis.items()
+                chave for chave, var in variaveis.items()
                 if var.get()
             ]
 
@@ -506,10 +655,7 @@ class MainWindow:
         id_linha = self.pedidos_tab.get_selected_id_linha()
 
         if id_linha is None:
-            messagebox.showwarning(
-                "Seleção inválida",
-                "Selecione um item dentro de um pedido."
-            )
+            messagebox.showwarning("Seleção inválida", "Selecione um item dentro de um pedido.")
             return
 
         self.state.bloquear_linha(id_linha, "")
@@ -561,10 +707,7 @@ class MainWindow:
         codigo = self.pedidos_tab.get_codigo_item_global()
 
         if not codigo:
-            messagebox.showwarning(
-                "Nenhum item informado",
-                "Digite o código do item ou selecione um item."
-            )
+            messagebox.showwarning("Nenhum item informado", "Digite o código do item ou selecione um item.")
             return
 
         self.state.liberar_item_global(codigo)
@@ -594,10 +737,7 @@ class MainWindow:
         pedido = self.prog2_tab.get_selected_pedido()
 
         if not pedido:
-            messagebox.showwarning(
-                "Nenhum pedido selecionado",
-                "Selecione um pedido ou item no PROG 2."
-            )
+            messagebox.showwarning("Nenhum pedido selecionado", "Selecione um pedido ou item no PROG 2.")
             return
 
         self.state.remover_pedido_prog2(pedido)
@@ -608,10 +748,7 @@ class MainWindow:
         if not self.state.pedidos_prog2:
             return
 
-        confirmar = messagebox.askyesno(
-            "Limpar PROG 2",
-            "Deseja remover todos os pedidos do PROG 2?"
-        )
+        confirmar = messagebox.askyesno("Limpar PROG 2", "Deseja remover todos os pedidos do PROG 2?")
 
         if not confirmar:
             return
@@ -628,10 +765,7 @@ class MainWindow:
         observacoes = self.state.obter_observacoes_disponiveis()
 
         if not observacoes:
-            messagebox.showinfo(
-                "Sem observações",
-                "Não foram encontradas observações nos pedidos em aberto."
-            )
+            messagebox.showinfo("Sem observações", "Não foram encontradas observações nos pedidos em aberto.")
             return
 
         self.abrir_janela_checkbox(
@@ -659,10 +793,7 @@ class MainWindow:
         clientes = self.state.obter_clientes_bloqueio_disponiveis()
 
         if not clientes:
-            messagebox.showinfo(
-                "Clientes não encontrados",
-                "Nenhum cliente foi encontrado nos pedidos em aberto."
-            )
+            messagebox.showinfo("Clientes não encontrados", "Nenhum cliente foi encontrado nos pedidos em aberto.")
             return
 
         self.abrir_janela_checkbox(
@@ -678,9 +809,7 @@ class MainWindow:
                 f'Valor: {formatar_moeda(r["valor"])} | '
                 f'{r["cliente_original"]}'
             ),
-            texto_busca_funcao=lambda r: (
-                f'{r["cliente_curto"]} {r["cliente_original"]} {r["cliente_chave"]}'
-            ),
+            texto_busca_funcao=lambda r: f'{r["cliente_curto"]} {r["cliente_original"]} {r["cliente_chave"]}',
             selecionados_atuais=self.state.clientes_bloqueados,
             ao_bloquear=lambda selecionados: self.state.bloquear_clientes(selecionados, ""),
             ao_liberar=lambda selecionados: [self.state.liberar_cliente(item) for item in selecionados],
@@ -698,10 +827,7 @@ class MainWindow:
         itens = self.state.obter_itens_bloqueio_disponiveis()
 
         if not itens:
-            messagebox.showinfo(
-                "Itens não encontrados",
-                "Nenhum item foi encontrado nos pedidos em aberto."
-            )
+            messagebox.showinfo("Itens não encontrados", "Nenhum item foi encontrado nos pedidos em aberto.")
             return
 
         self.abrir_janela_checkbox(
@@ -713,12 +839,10 @@ class MainWindow:
                 f'{r["item"]} - {r["descricao"]} | '
                 f'Pedidos: {r["pedidos"]} | '
                 f'Clientes: {r["clientes"]} | '
-                f'Linhas: {r["linhas"]} | '
+                f'Qtd Total: {formatar_numero(r["qtde_total"])} | '
                 f'Valor: {formatar_moeda(r["valor"])}'
             ),
-            texto_busca_funcao=lambda r: (
-                f'{r["item"]} {r["descricao"]}'
-            ),
+            texto_busca_funcao=lambda r: f'{r["item"]} {r["descricao"]}',
             selecionados_atuais=self.state.codigos_itens_bloqueados,
             ao_bloquear=lambda selecionados: self.state.bloquear_itens_globais(selecionados, ""),
             ao_liberar=lambda selecionados: self.state.liberar_itens_globais(selecionados),
@@ -761,11 +885,7 @@ class MainWindow:
             inplace=True
         )
 
-        resultado.sort_values(
-            "Valor Liberado",
-            ascending=False,
-            inplace=True
-        )
+        resultado.sort_values("Qtde Liberada", ascending=False, inplace=True)
 
         return resultado
 
@@ -806,27 +926,16 @@ class MainWindow:
         resultado = pd.DataFrame(registros)
 
         if not resultado.empty:
-            resultado.sort_values(
-                "Valor Total Liberado",
-                ascending=False,
-                inplace=True
-            )
+            resultado.sort_values("Qtde Liberada", ascending=False, inplace=True)
 
         return resultado
 
     def abrir_arquivo_pdf(self, caminho):
-        try:
-            os.startfile(caminho)
-        except Exception:
-            caminho_url = caminho.replace(os.sep, "/")
-            webbrowser.open(f"file:///{caminho_url}")
+        self.abrir_arquivo(caminho)
 
     def exportar_dataframe_escolhido(self, df_exportar, titulo, nome_padrao, formato):
         if df_exportar.empty:
-            messagebox.showwarning(
-                "Sem dados para exportar",
-                "Não há dados liberados para exportar."
-            )
+            messagebox.showwarning("Sem dados para exportar", "Não há dados liberados para exportar.")
             return
 
         if formato == "pdf":
@@ -839,20 +948,14 @@ class MainWindow:
                 caminho = arquivo_temporario.name
                 arquivo_temporario.close()
 
-                exportar_dataframe_pdf(
-                    caminho,
-                    df_exportar,
-                    titulo=titulo
-                )
+                exportar_dataframe_pdf(caminho, df_exportar, titulo=titulo)
 
                 self.abrir_arquivo_pdf(caminho)
                 self.set_status(f"PDF temporário aberto: {caminho}")
 
             except Exception as erro:
-                messagebox.showerror(
-                    "Erro ao gerar PDF",
-                    str(erro)
-                )
+                self.registrar_erro("Erro ao gerar PDF", erro)
+                messagebox.showerror("Erro ao gerar PDF", str(erro))
 
             return
 
@@ -867,24 +970,14 @@ class MainWindow:
             return
 
         try:
-            exportar_dataframe_excel(
-                caminho,
-                df_exportar,
-                sheet_name=nome_padrao[:31]
-            )
+            exportar_dataframe_excel(caminho, df_exportar, sheet_name=nome_padrao[:31])
 
-            messagebox.showinfo(
-                "Exportação concluída",
-                f"Arquivo exportado com sucesso:\n{caminho}"
-            )
-
+            messagebox.showinfo("Exportação concluída", f"Arquivo exportado com sucesso:\n{caminho}")
             self.set_status(f"Arquivo exportado: {caminho}")
 
         except Exception as erro:
-            messagebox.showerror(
-                "Erro ao exportar",
-                str(erro)
-            )
+            self.registrar_erro("Erro ao exportar Excel", erro)
+            messagebox.showerror("Erro ao exportar", str(erro))
 
     def exportar_prog2_itens_liberados(self, formato="excel"):
         df_exportar = self.gerar_df_prog2_itens_liberados()
@@ -1004,10 +1097,7 @@ class MainWindow:
         id_linha = self.bloqueios_tab.get_selected_id_linha()
 
         if id_linha is None:
-            messagebox.showwarning(
-                "Nenhum bloqueio selecionado",
-                "Selecione uma linha bloqueada."
-            )
+            messagebox.showwarning("Nenhum bloqueio selecionado", "Selecione uma linha bloqueada.")
             return
 
         linha = self.state.pegar_linha_por_id(id_linha)
@@ -1019,10 +1109,7 @@ class MainWindow:
         item = str(linha["Item"])
 
         if pedido in self.state.pedidos_bloqueados:
-            confirmar = messagebox.askyesno(
-                "Liberar pedido",
-                f"Deseja liberar o pedido {pedido} inteiro?"
-            )
+            confirmar = messagebox.askyesno("Liberar pedido", f"Deseja liberar o pedido {pedido} inteiro?")
 
             if confirmar:
                 self.state.liberar_pedido(pedido)
@@ -1051,10 +1138,7 @@ class MainWindow:
                 self.state.liberar_observacao(observacao)
 
         elif item in self.state.codigos_itens_bloqueados:
-            confirmar = messagebox.askyesno(
-                "Liberar item global",
-                f"Deseja liberar o item {item} na carteira inteira?"
-            )
+            confirmar = messagebox.askyesno("Liberar item global", f"Deseja liberar o item {item} na carteira inteira?")
 
             if confirmar:
                 self.state.liberar_item_global(item)
@@ -1091,10 +1175,7 @@ class MainWindow:
 
     def exportar_excel(self):
         if not self.state.tem_dados():
-            messagebox.showwarning(
-                "Nenhum arquivo importado",
-                "Importe um CSV antes de exportar."
-            )
+            messagebox.showwarning("Nenhum arquivo importado", "Importe um CSV antes de exportar.")
             return
 
         caminho = filedialog.asksaveasfilename(
@@ -1109,25 +1190,16 @@ class MainWindow:
         try:
             exportar_excel_completo(caminho, self.state)
 
-            messagebox.showinfo(
-                "Exportação concluída",
-                f"Relatório exportado com sucesso:\n{caminho}"
-            )
-
+            messagebox.showinfo("Exportação concluída", f"Relatório exportado com sucesso:\n{caminho}")
             self.set_status(f"Excel exportado: {caminho}")
 
         except Exception as erro:
-            messagebox.showerror(
-                "Erro ao exportar Excel",
-                str(erro)
-            )
+            self.registrar_erro("Erro ao exportar Excel completo", erro)
+            messagebox.showerror("Erro ao exportar Excel", str(erro))
 
     def exportar_csv_atual(self):
         if not self.state.tem_dados():
-            messagebox.showwarning(
-                "Nenhum arquivo importado",
-                "Importe um CSV antes de exportar."
-            )
+            messagebox.showwarning("Nenhum arquivo importado", "Importe um CSV antes de exportar.")
             return
 
         aba_atual = self.abas.tab(self.abas.select(), "text")
@@ -1144,10 +1216,7 @@ class MainWindow:
             df_exportar = self.consolidacoes_tab.get_current_df()
 
         if df_exportar is None:
-            messagebox.showwarning(
-                "Nenhuma visualização",
-                "Nenhum dado disponível para exportar."
-            )
+            messagebox.showwarning("Nenhuma visualização", "Nenhum dado disponível para exportar.")
             return
 
         caminho = filedialog.asksaveasfilename(
@@ -1162,15 +1231,9 @@ class MainWindow:
         try:
             exportar_csv(caminho, df_exportar)
 
-            messagebox.showinfo(
-                "Exportação concluída",
-                f"CSV exportado com sucesso:\n{caminho}"
-            )
-
+            messagebox.showinfo("Exportação concluída", f"CSV exportado com sucesso:\n{caminho}")
             self.set_status(f"CSV exportado: {caminho}")
 
         except Exception as erro:
-            messagebox.showerror(
-                "Erro ao exportar CSV",
-                str(erro)
-            )
+            self.registrar_erro("Erro ao exportar CSV", erro)
+            messagebox.showerror("Erro ao exportar CSV", str(erro))

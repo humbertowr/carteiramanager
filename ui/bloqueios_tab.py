@@ -1,6 +1,8 @@
+import tkinter as tk
 from tkinter import ttk
 
-from core.formatters import formatar_moeda, formatar_numero, normalizar_texto
+from core.formatters import formatar_moeda, formatar_numero
+from ui.styles import configurar_tags_tabela
 
 
 class BloqueiosTab:
@@ -9,47 +11,80 @@ class BloqueiosTab:
         self.controller = controller
         self.state = state
 
+        self.busca_var = tk.StringVar()
+        self.tipo_var = tk.StringVar(value="Todos")
+
         self.mapa_linhas = {}
 
         self.criar_interface()
 
     def criar_interface(self):
-        container = ttk.Frame(self.parent, padding=8)
+        container = ttk.Frame(self.parent, padding=(8, 6))
         container.pack(fill="both", expand=True)
 
-        frame_botoes = ttk.LabelFrame(
-            container,
-            text="Ações de bloqueio",
-            padding=8,
+        self.criar_topo(container)
+        self.criar_tabela(container)
+
+    def criar_topo(self, parent):
+        frame_topo = ttk.LabelFrame(
+            parent,
+            text="Bloqueios aplicados",
+            padding=(8, 6),
             style="Section.TLabelframe"
         )
-        frame_botoes.pack(fill="x", pady=(0, 6))
+        frame_topo.pack(fill="x", pady=(0, 6))
+
+        ttk.Label(frame_topo, text="Busca geral").grid(row=0, column=0, sticky="w", padx=(0, 5))
+
+        entrada = ttk.Entry(frame_topo, textvariable=self.busca_var, width=34)
+        entrada.grid(row=0, column=1, sticky="w", padx=(0, 12))
+        entrada.bind("<KeyRelease>", lambda event: self.refresh())
+
+        ttk.Label(frame_topo, text="Tipo").grid(row=0, column=2, sticky="w", padx=(0, 5))
+
+        combo = ttk.Combobox(
+            frame_topo,
+            textvariable=self.tipo_var,
+            values=[
+                "Todos",
+                "Pedido bloqueado",
+                "Item bloqueado",
+                "Item bloqueado global",
+                "Cliente bloqueado",
+                "Observação bloqueada",
+            ],
+            state="readonly",
+            width=24
+        )
+        combo.grid(row=0, column=3, sticky="w", padx=(0, 12))
+        combo.bind("<<ComboboxSelected>>", lambda event: self.refresh())
 
         ttk.Button(
-            frame_botoes,
-            text="Liberar bloqueio selecionado",
+            frame_topo,
+            text="Liberar selecionado",
             command=self.controller.liberar_bloqueio_na_aba
-        ).pack(side="left", padx=(0, 5))
+        ).grid(row=0, column=4, sticky="w", padx=3)
 
         ttk.Button(
-            frame_botoes,
-            text="Limpar todos os bloqueios",
-            command=self.controller.limpar_todos_bloqueios
-        ).pack(side="left", padx=5)
+            frame_topo,
+            text="Limpar todos",
+            command=self.controller.limpar_todos_bloqueios,
+            style="Danger.TButton"
+        ).grid(row=0, column=5, sticky="w", padx=3)
 
         ttk.Label(
-            frame_botoes,
-            text="Lista bloqueios por item, pedido, cliente, item global ou observação.",
-            style="Subtitle.TLabel"
-        ).pack(side="left", padx=20)
+            frame_topo,
+            text="Use esta aba para revisar e remover bloqueios aplicados na carteira.",
+            style="Hint.TLabel"
+        ).grid(row=1, column=0, columnspan=6, sticky="w", pady=(6, 0))
 
-        self.criar_tabela(container)
+        frame_topo.columnconfigure(6, weight=1)
 
     def criar_tabela(self, parent):
         frame_tabela = ttk.LabelFrame(
             parent,
             text="Itens bloqueados",
-            padding=8,
+            padding=(8, 6),
             style="Section.TLabelframe"
         )
         frame_tabela.pack(fill="both", expand=True)
@@ -58,30 +93,28 @@ class BloqueiosTab:
             "Tipo Bloqueio",
             "Pedido",
             "Cliente",
+            "Cliente Original",
             "Item",
-            "Descrição",
+            "Descrição Item",
             "Observação",
             "Qtde Saldo",
             "Valor Bloqueado",
             "Motivo",
         )
 
-        self.tabela = ttk.Treeview(
-            frame_tabela,
-            columns=colunas,
-            show="headings"
-        )
+        self.tabela = ttk.Treeview(frame_tabela, columns=colunas, show="headings")
 
         larguras = {
-            "Tipo Bloqueio": 190,
-            "Pedido": 100,
-            "Cliente": 160,
+            "Tipo Bloqueio": 180,
+            "Pedido": 110,
+            "Cliente": 130,
+            "Cliente Original": 260,
             "Item": 100,
-            "Descrição": 300,
-            "Observação": 240,
+            "Descrição Item": 280,
+            "Observação": 220,
             "Qtde Saldo": 100,
-            "Valor Bloqueado": 140,
-            "Motivo": 240,
+            "Valor Bloqueado": 130,
+            "Motivo": 260,
         }
 
         for coluna in colunas:
@@ -93,28 +126,12 @@ class BloqueiosTab:
                 anchor="w"
             )
 
-        self.tabela.tag_configure(
-            "bloqueado",
-            background="#f8d7da",
-            foreground="#842029"
-        )
+        configurar_tags_tabela(self.tabela)
 
-        scroll_y = ttk.Scrollbar(
-            frame_tabela,
-            orient="vertical",
-            command=self.tabela.yview
-        )
+        scroll_y = ttk.Scrollbar(frame_tabela, orient="vertical", command=self.tabela.yview)
+        scroll_x = ttk.Scrollbar(frame_tabela, orient="horizontal", command=self.tabela.xview)
 
-        scroll_x = ttk.Scrollbar(
-            frame_tabela,
-            orient="horizontal",
-            command=self.tabela.xview
-        )
-
-        self.tabela.configure(
-            yscrollcommand=scroll_y.set,
-            xscrollcommand=scroll_x.set
-        )
+        self.tabela.configure(yscrollcommand=scroll_y.set, xscrollcommand=scroll_x.set)
 
         self.tabela.grid(row=0, column=0, sticky="nsew")
         scroll_y.grid(row=0, column=1, sticky="ns")
@@ -130,40 +147,46 @@ class BloqueiosTab:
         if not self.state.tem_dados():
             return
 
-        df = self.state.df_aberto()
+        df = self.state.gerar_df_bloqueios()
 
-        df_bloqueados = df[
-            df.apply(
-                lambda linha: self.state.linha_bloqueada(linha),
-                axis=1
-            )
-        ].copy()
-
-        if df_bloqueados.empty:
+        if df.empty:
             return
 
-        df_bloqueados.sort_values(["Pedido", "Item"], inplace=True)
+        termo = self.busca_var.get().strip().lower()
+        tipo = self.tipo_var.get()
 
-        for _, linha in df_bloqueados.iterrows():
-            id_linha = int(linha["ID Linha"])
-            iid = f"bloqueado_{id_linha}"
+        if tipo != "Todos":
+            df = df[df["Tipo Bloqueio"].astype(str).str.contains(tipo, case=False, na=False)]
+
+        if termo:
+            df = df[
+                df.astype(str).apply(
+                    lambda linha: linha.str.lower().str.contains(termo, na=False).any(),
+                    axis=1
+                )
+            ]
+
+        for indice, (_, linha) in enumerate(df.iterrows(), start=1):
+            iid = f"bloqueio_{indice}"
+            id_linha = int(linha.get("ID Linha", 0))
 
             self.tabela.insert(
                 "",
                 "end",
                 iid=iid,
                 values=(
-                    self.state.tipo_bloqueio_linha(linha),
-                    linha["Pedido"],
-                    self.state.abreviar_cliente(linha["Cliente"]),
-                    linha["Item"],
-                    linha["Descrição Item"],
-                    normalizar_texto(linha["Observação"]),
-                    formatar_numero(linha["Saldo a Faturar"]),
-                    formatar_moeda(linha["Valor em Carteira"]),
-                    self.state.motivo_bloqueio_linha(linha),
+                    linha.get("Tipo Bloqueio", ""),
+                    linha.get("Pedido", ""),
+                    linha.get("Cliente", ""),
+                    linha.get("Cliente Original", ""),
+                    linha.get("Item", ""),
+                    linha.get("Descrição Item", ""),
+                    linha.get("Observação", ""),
+                    formatar_numero(linha.get("Qtde Saldo", 0)),
+                    formatar_moeda(linha.get("Valor Bloqueado", 0)),
+                    linha.get("Motivo", ""),
                 ),
-                tags=("bloqueado",),
+                tags=("item_bloqueado",),
             )
 
             self.mapa_linhas[iid] = id_linha
