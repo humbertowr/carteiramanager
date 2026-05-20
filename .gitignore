@@ -1,0 +1,38 @@
+# Ambiente virtual
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# PyInstaller
+build/
+dist/
+*.spec
+
+# Arquivos temporários
+*.log
+*.tmp
+*.temp
+*.bak
+
+# Excel/PDF/CSV gerados pelo programa
+*.xlsx
+*.xls
+*.pdf
+*.csv
+
+# Configurações locais
+.env
+.env.local
+
+# VS Code
+.vscode/
+
+# Sistema
+.DS_Store
+Thumbs.db
+desktop.ini
