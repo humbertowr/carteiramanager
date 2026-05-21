@@ -21,6 +21,7 @@ class PedidosTab:
         self.mapa_linhas = {}
         self.mapa_pedidos = {}
         self.pedidos_marcados = set()
+        self.estado_expansao_pedidos = {}
 
         self.icone_marcado = "☑"
         self.icone_desmarcado = "☐"
@@ -318,6 +319,19 @@ class PedidosTab:
 
         self.refresh()
 
+    def capturar_estado_expansao(self):
+        for iid, pedido in list(self.mapa_pedidos.items()):
+            if not str(iid).startswith("pedido_"):
+                continue
+
+            try:
+                if self.tabela.exists(iid):
+                    self.estado_expansao_pedidos[str(pedido)] = bool(self.tabela.item(iid, "open"))
+            except tk.TclError:
+                pass
+
+        return dict(self.estado_expansao_pedidos)
+
     def desmarcar_todos_pedidos(self):
         self.pedidos_marcados.clear()
         self.refresh()
@@ -394,6 +408,8 @@ class PedidosTab:
         return True
 
     def refresh(self):
+        estados_expansao = self.capturar_estado_expansao()
+
         self.tabela.delete(*self.tabela.get_children())
         self.mapa_linhas.clear()
         self.mapa_pedidos.clear()
@@ -503,7 +519,7 @@ class PedidosTab:
                     grupo_faturamento,
                     status_texto,
                 ),
-                open=True,
+                open=estados_expansao.get(pedido_str, True),
                 tags=tags_pedido,
             )
 
@@ -628,7 +644,13 @@ class PedidosTab:
     def expandir_todos(self):
         for item in self.tabela.get_children():
             self.tabela.item(item, open=True)
+            pedido = self.mapa_pedidos.get(item)
+            if pedido is not None:
+                self.estado_expansao_pedidos[str(pedido)] = True
 
     def recolher_todos(self):
         for item in self.tabela.get_children():
             self.tabela.item(item, open=False)
+            pedido = self.mapa_pedidos.get(item)
+            if pedido is not None:
+                self.estado_expansao_pedidos[str(pedido)] = False

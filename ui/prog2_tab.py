@@ -16,6 +16,7 @@ class Prog2Tab:
 
         self.mapa_pedidos = {}
         self.pedidos_marcados = set()
+        self.estado_expansao_pedidos = {}
 
         self.sort_coluna = "Valor Liberado"
         self.sort_ascendente = False
@@ -272,6 +273,19 @@ class Prog2Tab:
 
         self.refresh()
 
+    def capturar_estado_expansao(self):
+        for iid, pedido in list(self.mapa_pedidos.items()):
+            if not str(iid).startswith("prog2_pedido_"):
+                continue
+
+            try:
+                if self.tabela.exists(iid):
+                    self.estado_expansao_pedidos[str(pedido)] = bool(self.tabela.item(iid, "open"))
+            except tk.TclError:
+                pass
+
+        return dict(self.estado_expansao_pedidos)
+
     def desmarcar_todos_pedidos(self):
         self.pedidos_marcados.clear()
         self.refresh()
@@ -378,6 +392,8 @@ class Prog2Tab:
             self.label_meta_faltante.config(text=f"Meta superada em: {formatar_moeda(abs(falta))}")
 
     def refresh(self):
+        estados_expansao = self.capturar_estado_expansao()
+
         self.tabela.delete(*self.tabela.get_children())
         self.mapa_pedidos.clear()
         self.atualizar_cabecalhos()
@@ -470,7 +486,7 @@ class Prog2Tab:
                     "",
                     status,
                 ),
-                open=True,
+                open=estados_expansao.get(pedido_str, True),
                 tags=tags_pedido,
             )
 
@@ -540,7 +556,13 @@ class Prog2Tab:
     def expandir_todos(self):
         for item in self.tabela.get_children():
             self.tabela.item(item, open=True)
+            pedido = self.mapa_pedidos.get(item)
+            if pedido is not None:
+                self.estado_expansao_pedidos[str(pedido)] = True
 
     def recolher_todos(self):
         for item in self.tabela.get_children():
             self.tabela.item(item, open=False)
+            pedido = self.mapa_pedidos.get(item)
+            if pedido is not None:
+                self.estado_expansao_pedidos[str(pedido)] = False
