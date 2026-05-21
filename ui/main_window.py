@@ -23,15 +23,16 @@ from core.formatters import formatar_moeda, formatar_numero
 from ui.styles import configurar_estilo
 from ui.pedidos_tab import PedidosTab
 from ui.prog2_tab import Prog2Tab
-from ui.liberados_tab import LiberadosTab
+from ui.atrasados_tab import AtrasadosTab
 from ui.bloqueios_tab import BloqueiosTab
 from ui.consolidacoes_tab import ConsolidacoesTab
+from ui.sortable_tree import aplicar_ordenacao_treeview
 
 
 class MainWindow:
     def __init__(self, root):
         self.root = root
-        self.root.title("CarteiraOps")
+        self.root.title("Carteira Manager")
         self.root.geometry("1500x860")
         self.root.minsize(1180, 700)
 
@@ -44,6 +45,9 @@ class MainWindow:
         self.config = self.config_manager.carregar()
 
         self.ultimo_arquivo_importado = self.config.get("ultimo_csv", "")
+        self.observacoes_internas = self.config.setdefault("observacoes_internas", {})
+
+        self._cache = {}
 
         self.garantir_preset_padrao_clientes()
 
@@ -60,7 +64,7 @@ class MainWindow:
         self.criar_barra_status()
 
     def criar_topo(self):
-        frame = ttk.Frame(self.root, padding=(10, 7), style="TopBar.TFrame")
+        frame = ttk.Frame(self.root, padding=(12, 8), style="TopBar.TFrame")
         frame.pack(fill="x")
 
         bloco_titulo = ttk.Frame(frame, style="TopBar.TFrame")
@@ -68,27 +72,35 @@ class MainWindow:
 
         ttk.Label(
             bloco_titulo,
-            text="CarteiraOps",
+            text="Carteira Manager",
             style="TopBarTitle.TLabel",
         ).pack(anchor="w")
 
-        ttk.Label(
-            bloco_titulo,
-            text="Consolidação, bloqueios e programação de carteira de pedidos.",
-            style="TopBarSubtitle.TLabel",
-        ).pack(anchor="w", pady=(1, 0))
-
         bloco_menus = ttk.Frame(frame, style="TopBar.TFrame")
-        bloco_menus.pack(side="right")
+        bloco_menus.pack(side="right", padx=(12, 0))
 
         self.criar_menu_arquivo(bloco_menus)
         self.criar_menu_presets(bloco_menus)
         self.criar_menu_exportacao(bloco_menus)
         self.criar_menu_suporte(bloco_menus)
 
+    def criar_menu_popup(self, parent):
+        menu = tk.Menu(
+            parent,
+            tearoff=0,
+            font=("Segoe UI", 9),
+            background="#ffffff",
+            foreground="#111827",
+            activebackground="#e0f2fe",
+            activeforeground="#0f172a",
+            relief="flat",
+            borderwidth=1,
+        )
+        return menu
+
     def criar_menu_arquivo(self, parent):
-        botao = ttk.Menubutton(parent, text="Arquivo ▾")
-        menu = tk.Menu(botao, tearoff=0)
+        botao = ttk.Menubutton(parent, text="Arquivo  ▾", style="TopMenu.TMenubutton")
+        menu = self.criar_menu_popup(botao)
 
         menu.add_command(label="Importar CSV", command=self.importar_csv)
         menu.add_command(label="Recarregar último CSV", command=self.recarregar_ultimo_csv)
@@ -98,11 +110,11 @@ class MainWindow:
         menu.add_command(label="Sair", command=self.root.destroy)
 
         botao["menu"] = menu
-        botao.pack(side="left", padx=3)
+        botao.pack(side="left", padx=(6, 0), ipady=1)
 
     def criar_menu_presets(self, parent):
-        botao = ttk.Menubutton(parent, text="Presets ▾")
-        menu = tk.Menu(botao, tearoff=0)
+        botao = ttk.Menubutton(parent, text="Presets  ▾", style="TopMenu.TMenubutton")
+        menu = self.criar_menu_popup(botao)
 
         menu.add_command(
             label="Criar preset com itens bloqueados atuais",
@@ -125,28 +137,27 @@ class MainWindow:
         )
 
         botao["menu"] = menu
-        botao.pack(side="left", padx=3)
+        botao.pack(side="left", padx=(6, 0), ipady=1)
 
     def criar_menu_exportacao(self, parent):
-        botao = ttk.Menubutton(parent, text="Exportações ▾")
-        menu = tk.Menu(botao, tearoff=0)
+        botao = ttk.Menubutton(parent, text="Exportar  ▾", style="TopMenu.TMenubutton")
+        menu = self.criar_menu_popup(botao)
 
-        menu.add_command(label="Exportar relatório completo em Excel", command=self.exportar_excel)
-        menu.add_command(label="Exportar aba atual em CSV", command=self.exportar_csv_atual)
+        menu.add_command(label="Relatório completo em Excel", command=self.exportar_excel)
+        menu.add_command(label="Aba atual em CSV", command=self.exportar_csv_atual)
 
         botao["menu"] = menu
-        botao.pack(side="left", padx=3)
+        botao.pack(side="left", padx=(6, 0), ipady=1)
 
     def criar_menu_suporte(self, parent):
-        botao = ttk.Menubutton(parent, text="Suporte ▾")
-        menu = tk.Menu(botao, tearoff=0)
+        botao = ttk.Menubutton(parent, text="Ajuda  ▾", style="TopMenu.TMenubutton")
+        menu = self.criar_menu_popup(botao)
 
-        menu.add_command(label="Abrir arquivo de configuração", command=self.abrir_config)
         menu.add_command(label="Abrir arquivo de log", command=self.abrir_log)
         menu.add_command(label="Sobre", command=self.mostrar_sobre)
 
         botao["menu"] = menu
-        botao.pack(side="left", padx=3)
+        botao.pack(side="left", padx=(6, 0), ipady=1)
 
     def criar_resumo(self):
         frame = ttk.LabelFrame(
@@ -188,8 +199,8 @@ class MainWindow:
 
             self.labels_resumo[campo] = label_valor
 
-        for i in range(len(campos)):
-            frame.columnconfigure(i, weight=1)
+        for indice in range(len(campos)):
+            frame.columnconfigure(indice, weight=1)
 
     def criar_abas(self):
         self.abas = ttk.Notebook(self.root)
@@ -197,21 +208,41 @@ class MainWindow:
 
         aba_pedidos = ttk.Frame(self.abas)
         aba_prog2 = ttk.Frame(self.abas)
-        aba_liberados = ttk.Frame(self.abas)
+        aba_atrasados = ttk.Frame(self.abas)
         aba_bloqueios = ttk.Frame(self.abas)
         aba_consolidacoes = ttk.Frame(self.abas)
 
         self.abas.add(aba_pedidos, text="Pedidos")
         self.abas.add(aba_prog2, text="PROG 2")
-        self.abas.add(aba_liberados, text="Liberados")
+        self.abas.add(aba_atrasados, text="Atrasados")
         self.abas.add(aba_bloqueios, text="Bloqueios")
         self.abas.add(aba_consolidacoes, text="Consolidações")
 
         self.pedidos_tab = PedidosTab(aba_pedidos, self, self.state)
         self.prog2_tab = Prog2Tab(aba_prog2, self, self.state)
-        self.liberados_tab = LiberadosTab(aba_liberados, self, self.state, self.pedidos_tab)
+        self.atrasados_tab = AtrasadosTab(aba_atrasados, self, self.state)
         self.bloqueios_tab = BloqueiosTab(aba_bloqueios, self, self.state)
         self.consolidacoes_tab = ConsolidacoesTab(aba_consolidacoes, self, self.state)
+
+        self.aplicar_ordenacao_tabelas()
+
+    def aplicar_ordenacao_tabelas(self):
+        abas = [
+            getattr(self, "pedidos_tab", None),
+            getattr(self, "prog2_tab", None),
+            getattr(self, "atrasados_tab", None),
+            getattr(self, "bloqueios_tab", None),
+            getattr(self, "consolidacoes_tab", None),
+        ]
+
+        for aba in abas:
+            tabela = getattr(aba, "tabela", None)
+
+            if tabela is not None:
+                try:
+                    aplicar_ordenacao_treeview(tabela)
+                except Exception:
+                    pass
 
     def criar_barra_status(self):
         texto = "Importe um arquivo CSV para começar."
@@ -230,6 +261,27 @@ class MainWindow:
 
     def set_status(self, texto):
         self.status.config(text=texto)
+
+    def invalidar_cache(self):
+        self._cache.clear()
+
+    def obter_df_aberto_cache(self):
+        if not self.state.tem_dados():
+            return pd.DataFrame()
+
+        if "df_aberto" not in self._cache:
+            self._cache["df_aberto"] = self.state.df_aberto()
+
+        return self._cache["df_aberto"]
+
+    def obter_df_com_bloqueios_cache(self):
+        if not self.state.tem_dados():
+            return pd.DataFrame()
+
+        if "df_com_bloqueios" not in self._cache:
+            self._cache["df_com_bloqueios"] = self.state.df_com_bloqueios(self.obter_df_aberto_cache())
+
+        return self._cache["df_com_bloqueios"]
 
     def garantir_preset_padrao_clientes(self):
         presets_clientes = self.config.setdefault("presets", {}).setdefault("clientes", {})
@@ -256,6 +308,7 @@ class MainWindow:
     def salvar_estado_atual(self):
         self.config["ultimo_csv"] = self.ultimo_arquivo_importado or ""
         self.config["estado"] = self.gerar_estado_para_salvar()
+        self.config["observacoes_internas"] = self.observacoes_internas
         self.config_manager.salvar(self.config)
 
     def salvar_estado_manual(self):
@@ -273,6 +326,7 @@ class MainWindow:
             return
 
         estado = self.config.get("estado", {})
+        self.observacoes_internas = self.config.setdefault("observacoes_internas", {})
 
         df = self.state.df_original
 
@@ -325,6 +379,51 @@ class MainWindow:
         self.state.motivos_observacao = dict(estado.get("motivos_observacao", {}))
         self.state.motivos_cliente = dict(estado.get("motivos_cliente", {}))
 
+        self.observacoes_internas = {
+            str(pedido): texto
+            for pedido, texto in self.observacoes_internas.items()
+            if str(pedido) in pedidos_existentes
+        }
+
+    def observacao_interna_pedido(self, pedido):
+        return self.observacoes_internas.get(str(pedido), "")
+
+    def editar_observacao_interna(self, pedido):
+        pedido = str(pedido)
+        atual = self.observacoes_internas.get(pedido, "")
+
+        texto = simpledialog.askstring(
+            "Observação interna",
+            f"Observação interna do pedido {pedido}:",
+            initialvalue=atual,
+            parent=self.root
+        )
+
+        if texto is None:
+            return
+
+        texto = texto.strip()
+
+        if texto:
+            self.observacoes_internas[pedido] = texto
+        else:
+            self.observacoes_internas.pop(pedido, None)
+
+        self.salvar_estado_atual()
+        self.refresh_all()
+        self.set_status(f"Observação interna atualizada para o pedido {pedido}.")
+
+    def limpar_observacao_interna(self, pedido):
+        pedido = str(pedido)
+
+        if pedido in self.observacoes_internas:
+            self.observacoes_internas.pop(pedido, None)
+            self.salvar_estado_atual()
+            self.refresh_all()
+            self.set_status(f"Observação interna removida do pedido {pedido}.")
+        else:
+            self.set_status(f"O pedido {pedido} não possui observação interna.")
+
     def registrar_erro(self, contexto, erro):
         data = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
 
@@ -336,9 +435,6 @@ class MainWindow:
             arquivo.write(traceback.format_exc())
             arquivo.write("\n")
 
-    def abrir_config(self):
-        self.abrir_arquivo(str(self.config_manager.config_path))
-
     def abrir_log(self):
         if not self.log_path.exists():
             self.log_path.write_text("Nenhum erro registrado até o momento.\n", encoding="utf-8")
@@ -348,9 +444,8 @@ class MainWindow:
     def mostrar_sobre(self):
         messagebox.showinfo(
             "Sobre",
-            "CarteiraOps\n\n"
+            "Carteira Manager\n\n"
             "Aplicativo desktop para consolidação, bloqueio e programação de carteira de pedidos.\n\n"
-            f"Configuração local:\n{self.config_manager.config_path}\n\n"
             f"Log local:\n{self.log_path}"
         )
 
@@ -402,10 +497,11 @@ class MainWindow:
 
             df = carregar_carteira(caminho)
             self.state.carregar_dataframe(df)
-
             self.ultimo_arquivo_importado = caminho
 
+            self.invalidar_cache()
             self.restaurar_estado_salvo()
+            self.invalidar_cache()
             self.refresh_all()
             self.salvar_estado_atual()
 
@@ -430,22 +526,24 @@ class MainWindow:
         self.atualizar_resumo()
         self.pedidos_tab.refresh()
         self.prog2_tab.refresh()
-        self.liberados_tab.refresh()
+        self.atrasados_tab.refresh()
         self.bloqueios_tab.refresh()
         self.consolidacoes_tab.refresh()
+        self.aplicar_ordenacao_tabelas()
 
     def refresh_pedidos(self):
         self.pedidos_tab.refresh()
         self.prog2_tab.refresh()
-        self.liberados_tab.refresh()
+        self.atrasados_tab.refresh()
         self.atualizar_resumo()
+        self.aplicar_ordenacao_tabelas()
 
     def atualizar_resumo(self):
         if not self.state.tem_dados():
             return
 
-        df_aberto = self.state.df_aberto()
-        df_bloqueios = self.state.df_com_bloqueios(df_aberto)
+        df_aberto = self.obter_df_aberto_cache()
+        df_bloqueios = self.obter_df_com_bloqueios_cache()
 
         valor_total = df_bloqueios["Valor em Carteira"].sum() if not df_bloqueios.empty else 0
         valor_bloqueado = df_bloqueios["_Valor Bloqueado"].sum() if not df_bloqueios.empty else 0
@@ -658,6 +756,7 @@ class MainWindow:
             else:
                 self.state.bloquear_clientes(valores, "")
 
+            self.invalidar_cache()
             self.refresh_all()
             self.salvar_estado_atual()
 
@@ -801,6 +900,7 @@ class MainWindow:
                     for chave in preset_chaves_presentes:
                         variaveis[chave].set(True)
 
+                    self.invalidar_cache()
                     self.refresh_all()
                     self.salvar_estado_atual()
                     self.set_status(f"{preset_nome} aplicado.")
@@ -810,6 +910,7 @@ class MainWindow:
                     for chave in preset_chaves_presentes:
                         variaveis[chave].set(False)
 
+                    self.invalidar_cache()
                     self.refresh_all()
                     self.salvar_estado_atual()
                     self.set_status(f"{preset_nome} removido.")
@@ -993,6 +1094,7 @@ class MainWindow:
                 return
 
             ao_bloquear(selecionados)
+            self.invalidar_cache()
             self.refresh_all()
             self.salvar_estado_atual()
             janela.destroy()
@@ -1012,6 +1114,7 @@ class MainWindow:
                 return
 
             ao_liberar(selecionados)
+            self.invalidar_cache()
             self.refresh_all()
             self.salvar_estado_atual()
             janela.destroy()
@@ -1051,6 +1154,7 @@ class MainWindow:
             return
 
         self.state.bloquear_linha(id_linha, "")
+        self.invalidar_cache()
         self.refresh_all()
         self.salvar_estado_atual()
         self.set_status("Item selecionado bloqueado para faturamento.")
@@ -1070,6 +1174,7 @@ class MainWindow:
             return
 
         self.state.bloquear_pedido(pedido, "")
+        self.invalidar_cache()
         self.refresh_all()
         self.salvar_estado_atual()
         self.set_status(f"Pedido {pedido} bloqueado para faturamento.")
@@ -1091,6 +1196,7 @@ class MainWindow:
         self.state.bloquear_item_global(codigo, "")
         self.pedidos_tab.set_codigo_item_global(codigo)
 
+        self.invalidar_cache()
         self.refresh_all()
         self.salvar_estado_atual()
         self.set_status(f"Item {codigo} bloqueado na carteira inteira.")
@@ -1107,6 +1213,7 @@ class MainWindow:
 
         self.state.liberar_item_global(codigo)
 
+        self.invalidar_cache()
         self.refresh_all()
         self.salvar_estado_atual()
         self.set_status(f"Item {codigo} liberado na carteira inteira.")
@@ -1130,6 +1237,23 @@ class MainWindow:
         self.salvar_estado_atual()
         self.set_status(f"Pedido {pedido} adicionado ao PROG 2.")
 
+    def adicionar_pedidos_selecionados_prog2(self, pedidos):
+        if not self.state.tem_dados():
+            return
+
+        adicionados = 0
+
+        for pedido in pedidos:
+            antes = len(self.state.pedidos_prog2)
+            self.state.adicionar_pedido_prog2(pedido)
+
+            if len(self.state.pedidos_prog2) > antes:
+                adicionados += 1
+
+        self.refresh_all()
+        self.salvar_estado_atual()
+        self.set_status(f"{adicionados} pedido(s) adicionados ao PROG 2.")
+
     def remover_pedido_selecionado_prog2(self):
         pedido = self.prog2_tab.get_selected_pedido()
 
@@ -1141,6 +1265,17 @@ class MainWindow:
         self.refresh_all()
         self.salvar_estado_atual()
         self.set_status(f"Pedido {pedido} removido do PROG 2.")
+
+    def remover_pedidos_selecionados_prog2(self, pedidos):
+        if not pedidos:
+            return
+
+        for pedido in pedidos:
+            self.state.remover_pedido_prog2(pedido)
+
+        self.refresh_all()
+        self.salvar_estado_atual()
+        self.set_status(f"{len(pedidos)} pedido(s) removidos do PROG 2.")
 
     def limpar_prog2(self):
         if not self.state.pedidos_prog2:
@@ -1251,7 +1386,7 @@ class MainWindow:
         if not self.state.tem_dados() or not self.state.pedidos_prog2:
             return pd.DataFrame()
 
-        df = self.state.df_com_bloqueios(self.state.df_aberto())
+        df = self.obter_df_com_bloqueios_cache()
 
         pedidos_prog2 = set(str(pedido) for pedido in self.state.pedidos_prog2)
         df = df[df["Pedido Texto"].isin(pedidos_prog2)]
@@ -1292,7 +1427,7 @@ class MainWindow:
         if not self.state.tem_dados() or not self.state.pedidos_prog2:
             return pd.DataFrame()
 
-        df = self.state.df_com_bloqueios(self.state.df_aberto())
+        df = self.obter_df_com_bloqueios_cache()
 
         pedidos_prog2 = set(str(pedido) for pedido in self.state.pedidos_prog2)
         df = df[df["Pedido Texto"].isin(pedidos_prog2)]
@@ -1332,9 +1467,61 @@ class MainWindow:
     def abrir_arquivo_pdf(self, caminho):
         self.abrir_arquivo(caminho)
 
+    def abrir_janela_revisao_exportacao(self, df_exportar, titulo, formato):
+        if df_exportar is None or df_exportar.empty:
+            return False
+
+        qtd_linhas = len(df_exportar)
+
+        qtd_pedidos = 0
+        if "Pedido" in df_exportar.columns:
+            qtd_pedidos = df_exportar["Pedido"].nunique()
+
+        qtd_itens = 0
+        if "Item" in df_exportar.columns:
+            qtd_itens = df_exportar["Item"].nunique()
+        elif "Qtd. Itens Liberados" in df_exportar.columns:
+            qtd_itens = df_exportar["Qtd. Itens Liberados"].sum()
+
+        qtd_clientes = 0
+        if "Cliente Original" in df_exportar.columns:
+            qtd_clientes = df_exportar["Cliente Original"].nunique()
+        elif "Cliente" in df_exportar.columns:
+            qtd_clientes = df_exportar["Cliente"].nunique()
+
+        qtde_total = 0
+        for coluna in ["Qtde Liberada", "Qtde Saldo Liberada", "Qtde"]:
+            if coluna in df_exportar.columns:
+                qtde_total = df_exportar[coluna].sum()
+                break
+
+        valor_total = 0
+        for coluna in ["Valor Liberado", "Valor Total Liberado", "Valor"]:
+            if coluna in df_exportar.columns:
+                valor_total = df_exportar[coluna].sum()
+                break
+
+        mensagem = (
+            f"{titulo}\n\n"
+            f"Formato: {formato.upper()}\n"
+            f"Linhas: {qtd_linhas}\n"
+            f"Pedidos: {qtd_pedidos}\n"
+            f"Itens: {formatar_numero(qtd_itens)}\n"
+            f"Clientes: {qtd_clientes}\n"
+            f"Qtde total: {formatar_numero(qtde_total)}\n"
+            f"Valor liberado: {formatar_moeda(valor_total)}\n\n"
+            "Deseja continuar?"
+        )
+
+        return messagebox.askyesno("Revisar exportação", mensagem)
+
     def exportar_dataframe_escolhido(self, df_exportar, titulo, nome_padrao, formato):
         if df_exportar.empty:
             messagebox.showwarning("Sem dados para exportar", "Não há dados liberados para exportar.")
+            return
+
+        if not self.abrir_janela_revisao_exportacao(df_exportar, titulo, formato):
+            self.set_status("Exportação cancelada.")
             return
 
         if formato == "pdf":
@@ -1433,6 +1620,7 @@ class MainWindow:
                 if confirmar:
                     self.state.liberar_observacao(observacao)
 
+            self.invalidar_cache()
             self.refresh_all()
             self.salvar_estado_atual()
             self.set_status(f"Pedido {pedido} liberado.")
@@ -1490,6 +1678,7 @@ class MainWindow:
         else:
             self.state.liberar_linha(id_linha)
 
+        self.invalidar_cache()
         self.refresh_all()
         self.salvar_estado_atual()
         self.set_status("Seleção liberada.")
@@ -1547,6 +1736,7 @@ class MainWindow:
         else:
             self.state.liberar_linha(id_linha)
 
+        self.invalidar_cache()
         self.refresh_all()
         self.salvar_estado_atual()
         self.set_status("Bloqueio removido.")
@@ -1572,6 +1762,7 @@ class MainWindow:
             return
 
         self.state.limpar_bloqueios()
+        self.invalidar_cache()
         self.refresh_all()
         self.salvar_estado_atual()
         self.set_status("Todos os bloqueios foram removidos.")
@@ -1611,8 +1802,8 @@ class MainWindow:
             df_exportar = self.state.gerar_df_pedidos_ajustados()
         elif aba_atual == "PROG 2":
             df_exportar = self.state.gerar_df_prog2()
-        elif aba_atual == "Liberados":
-            df_exportar = self.state.gerar_df_pedidos_liberados()
+        elif aba_atual == "Atrasados":
+            df_exportar = self.atrasados_tab.get_current_df()
         elif aba_atual == "Bloqueios":
             df_exportar = self.state.gerar_df_bloqueios()
         else:

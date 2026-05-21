@@ -1,6 +1,8 @@
 from tkinter import ttk
 
 
+FONTE = "Segoe UI"
+
 CORES = {
     "bg": "#f3f4f6",
     "card": "#ffffff",
@@ -8,6 +10,12 @@ CORES = {
     "text": "#111827",
     "muted": "#6b7280",
     "header": "#e5e7eb",
+    "topbar": "#0f172a",
+    "topbar_2": "#111827",
+    "topbar_button": "#1e293b",
+    "topbar_button_hover": "#334155",
+    "topbar_button_pressed": "#2563eb",
+    "topbar_text": "#f8fafc",
     "primary": "#2563eb",
     "primary_hover": "#1d4ed8",
     "success_bg": "#dcfce7",
@@ -19,10 +27,10 @@ CORES = {
     "info_bg": "#dbeafe",
     "info_fg": "#1e40af",
     "row_alt": "#f9fafb",
+    "selected_batch_bg": "#bfdbfe",
+    "selected_batch_item_bg": "#eff6ff",
+    "selected_batch_fg": "#1e3a8a",
 }
-
-
-FONTE = "Segoe UI"
 
 
 def configurar_estilo():
@@ -40,21 +48,53 @@ def configurar_estilo():
         foreground=CORES["text"],
     )
 
+    estilo.configure("TFrame", background=CORES["bg"])
+
     estilo.configure(
-        "TFrame",
-        background=CORES["bg"],
+        "TopBar.TFrame",
+        background=CORES["topbar"],
     )
 
     estilo.configure(
-        "Card.TFrame",
-        background=CORES["card"],
-        relief="solid",
-        borderwidth=1,
+        "TopBarTitle.TLabel",
+        font=(FONTE, 15, "bold"),
+        background=CORES["topbar"],
+        foreground=CORES["topbar_text"],
+        padding=(0, 1),
     )
 
     estilo.configure(
-        "Toolbar.TFrame",
-        background=CORES["card"],
+        "TopBarSubtitle.TLabel",
+        font=(FONTE, 8),
+        background=CORES["topbar"],
+        foreground="#cbd5e1",
+    )
+
+    estilo.configure(
+        "TopMenu.TMenubutton",
+        font=(FONTE, 9, "bold"),
+        padding=(13, 7),
+        background=CORES["topbar_button"],
+        foreground=CORES["topbar_text"],
+        borderwidth=0,
+        relief="flat",
+        arrowcolor=CORES["topbar_text"],
+    )
+
+    estilo.map(
+        "TopMenu.TMenubutton",
+        background=[
+            ("pressed", CORES["topbar_button_pressed"]),
+            ("active", CORES["topbar_button_hover"]),
+        ],
+        foreground=[
+            ("pressed", "#ffffff"),
+            ("active", "#ffffff"),
+        ],
+        relief=[
+            ("pressed", "flat"),
+            ("active", "flat"),
+        ],
     )
 
     estilo.configure(
@@ -68,13 +108,6 @@ def configurar_estilo():
         "Card.TLabel",
         font=(FONTE, 9),
         background=CORES["card"],
-        foreground=CORES["text"],
-    )
-
-    estilo.configure(
-        "Title.TLabel",
-        font=(FONTE, 17, "bold"),
-        background=CORES["bg"],
         foreground=CORES["text"],
     )
 
@@ -97,25 +130,6 @@ def configurar_estilo():
         font=(FONTE, 8),
         foreground=CORES["muted"],
         background=CORES["card"],
-    )
-
-    estilo.configure(
-        "TopBar.TFrame",
-        background=CORES["card"],
-    )
-
-    estilo.configure(
-        "TopBarTitle.TLabel",
-        font=(FONTE, 15, "bold"),
-        background=CORES["card"],
-        foreground=CORES["text"],
-    )
-
-    estilo.configure(
-        "TopBarSubtitle.TLabel",
-        font=(FONTE, 8),
-        background=CORES["card"],
-        foreground=CORES["muted"],
     )
 
     estilo.configure(
@@ -195,27 +209,6 @@ def configurar_estilo():
         "KpiDanger.TLabel",
         font=(FONTE, 10, "bold"),
         foreground=CORES["danger_fg"],
-        background=CORES["bg"],
-    )
-
-    estilo.configure(
-        "Summary.TLabelframe",
-        background=CORES["bg"],
-        borderwidth=1,
-        relief="solid",
-    )
-
-    estilo.configure(
-        "Summary.TLabelframe.Label",
-        font=(FONTE, 8, "bold"),
-        foreground=CORES["text"],
-        background=CORES["bg"],
-    )
-
-    estilo.configure(
-        "SummaryTitle.TLabel",
-        font=(FONTE, 8),
-        foreground=CORES["muted"],
         background=CORES["bg"],
     )
 
@@ -326,10 +319,10 @@ def configurar_tags_tabela(tabela):
     tabela.tag_configure("pedido_liberado", background=CORES["success_bg"], foreground=CORES["success_fg"])
     tabela.tag_configure("pedido_parcial", background=CORES["warning_bg"], foreground=CORES["warning_fg"])
     tabela.tag_configure("pedido_bloqueado", background=CORES["danger_bg"], foreground=CORES["danger_fg"])
-
+    tabela.tag_configure("pedido_marcado", background=CORES["selected_batch_bg"], foreground=CORES["selected_batch_fg"], font=(FONTE, 9, "bold"))
     tabela.tag_configure("item_linha", background=CORES["card"], foreground="#374151")
     tabela.tag_configure("item_liberado", background=CORES["success_bg"], foreground=CORES["success_fg"])
     tabela.tag_configure("item_bloqueado", background=CORES["danger_bg"], foreground=CORES["danger_fg"])
-
+    tabela.tag_configure("item_marcado", background=CORES["selected_batch_item_bg"], foreground=CORES["selected_batch_fg"])
     tabela.tag_configure("prog2", background=CORES["info_bg"], foreground=CORES["info_fg"])
     tabela.tag_configure("linha_alt", background=CORES["row_alt"])

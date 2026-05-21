@@ -29,6 +29,14 @@ class ConfigManager:
                 "itens": {},
                 "clientes": {},
             },
+            "observacoes_internas": {},
+            "settings": {
+                "valor_minimo_padrao": "1000",
+                "abrir_pdf_automaticamente": True,
+                "salvar_estado_automaticamente": True,
+                "restaurar_ultimo_csv_ao_abrir": False,
+                "pasta_exportacao": "",
+            },
         }
 
     def carregar(self):
@@ -63,6 +71,12 @@ class ConfigManager:
         if "presets" not in config or not isinstance(config["presets"], dict):
             config["presets"] = padrao["presets"]
 
+        if "observacoes_internas" not in config or not isinstance(config["observacoes_internas"], dict):
+            config["observacoes_internas"] = {}
+
+        if "settings" not in config or not isinstance(config["settings"], dict):
+            config["settings"] = padrao["settings"]
+
         for chave, valor in padrao["estado"].items():
             if chave not in config["estado"]:
                 config["estado"][chave] = valor
@@ -72,6 +86,10 @@ class ConfigManager:
 
         if "clientes" not in config["presets"] or not isinstance(config["presets"]["clientes"], dict):
             config["presets"]["clientes"] = {}
+
+        for chave, valor in padrao["settings"].items():
+            if chave not in config["settings"]:
+                config["settings"][chave] = valor
 
         return config
 
