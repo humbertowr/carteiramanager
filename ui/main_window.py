@@ -6,12 +6,13 @@ import webbrowser
 from datetime import datetime
 from pathlib import Path
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import ttk, filedialog, messagebox, simpledialog
 
 import pandas as pd
 
 from core.app_state import AppState, CLIENTES_BLOQUEIO_PADRAO
 from core.carteira_processor import carregar_carteira
+from core.config_manager import ConfigManager
 from core.exporter import (
     exportar_csv,
     exportar_excel_completo,
@@ -30,7 +31,7 @@ from ui.consolidacoes_tab import ConsolidacoesTab
 class MainWindow:
     def __init__(self, root):
         self.root = root
-        self.root.title("Carteira Manager")
+        self.root.title("CarteiraOps")
         self.root.geometry("1500x860")
         self.root.minsize(1180, 700)
 
@@ -38,7 +39,13 @@ class MainWindow:
 
         self.state = AppState()
         self.labels_resumo = {}
-        self.ultimo_arquivo_importado = None
+
+        self.config_manager = ConfigManager()
+        self.config = self.config_manager.carregar()
+
+        self.ultimo_arquivo_importado = self.config.get("ultimo_csv", "")
+
+        self.garantir_preset_padrao_clientes()
 
         self.log_dir = Path.home() / ".carteira_ops" / "logs"
         self.log_dir.mkdir(parents=True, exist_ok=True)
@@ -61,15 +68,21 @@ class MainWindow:
 
         ttk.Label(
             bloco_titulo,
-            text="Carteira Manager",
+            text="CarteiraOps",
             style="TopBarTitle.TLabel",
         ).pack(anchor="w")
 
+        ttk.Label(
+            bloco_titulo,
+            text="Consolidação, bloqueios e programação de carteira de pedidos.",
+            style="TopBarSubtitle.TLabel",
+        ).pack(anchor="w", pady=(1, 0))
 
         bloco_menus = ttk.Frame(frame, style="TopBar.TFrame")
         bloco_menus.pack(side="right")
 
         self.criar_menu_arquivo(bloco_menus)
+        self.criar_menu_presets(bloco_menus)
         self.criar_menu_exportacao(bloco_menus)
         self.criar_menu_suporte(bloco_menus)
 
@@ -80,7 +93,36 @@ class MainWindow:
         menu.add_command(label="Importar CSV", command=self.importar_csv)
         menu.add_command(label="Recarregar último CSV", command=self.recarregar_ultimo_csv)
         menu.add_separator()
+        menu.add_command(label="Salvar estado agora", command=self.salvar_estado_manual)
+        menu.add_separator()
         menu.add_command(label="Sair", command=self.root.destroy)
+
+        botao["menu"] = menu
+        botao.pack(side="left", padx=3)
+
+    def criar_menu_presets(self, parent):
+        botao = ttk.Menubutton(parent, text="Presets ▾")
+        menu = tk.Menu(botao, tearoff=0)
+
+        menu.add_command(
+            label="Criar preset com itens bloqueados atuais",
+            command=self.criar_preset_itens
+        )
+        menu.add_command(
+            label="Aplicar preset de itens",
+            command=lambda: self.abrir_janela_presets("itens")
+        )
+
+        menu.add_separator()
+
+        menu.add_command(
+            label="Criar preset com clientes bloqueados atuais",
+            command=self.criar_preset_clientes
+        )
+        menu.add_command(
+            label="Aplicar preset de clientes",
+            command=lambda: self.abrir_janela_presets("clientes")
+        )
 
         botao["menu"] = menu
         botao.pack(side="left", padx=3)
@@ -99,6 +141,7 @@ class MainWindow:
         botao = ttk.Menubutton(parent, text="Suporte ▾")
         menu = tk.Menu(botao, tearoff=0)
 
+        menu.add_command(label="Abrir arquivo de configuração", command=self.abrir_config)
         menu.add_command(label="Abrir arquivo de log", command=self.abrir_log)
         menu.add_command(label="Sobre", command=self.mostrar_sobre)
 
@@ -171,9 +214,14 @@ class MainWindow:
         self.consolidacoes_tab = ConsolidacoesTab(aba_consolidacoes, self, self.state)
 
     def criar_barra_status(self):
+        texto = "Importe um arquivo CSV para começar."
+
+        if self.ultimo_arquivo_importado:
+            texto = f"Último CSV salvo: {self.ultimo_arquivo_importado}"
+
         self.status = ttk.Label(
             self.root,
-            text="Importe um arquivo CSV para começar.",
+            text=texto,
             relief="sunken",
             anchor="w",
             padding=(6, 4)
@@ -182,6 +230,100 @@ class MainWindow:
 
     def set_status(self, texto):
         self.status.config(text=texto)
+
+    def garantir_preset_padrao_clientes(self):
+        presets_clientes = self.config.setdefault("presets", {}).setdefault("clientes", {})
+
+        if "CLIENTES BLOQUEADOS 1" not in presets_clientes:
+            presets_clientes["CLIENTES BLOQUEADOS 1"] = sorted(CLIENTES_BLOQUEIO_PADRAO.keys())
+            self.config_manager.salvar(self.config)
+
+    def gerar_estado_para_salvar(self):
+        return {
+            "linhas_bloqueadas": sorted(int(item) for item in self.state.linhas_bloqueadas),
+            "codigos_itens_bloqueados": sorted(str(item) for item in self.state.codigos_itens_bloqueados),
+            "pedidos_bloqueados": sorted(str(item) for item in self.state.pedidos_bloqueados),
+            "observacoes_bloqueadas": sorted(str(item) for item in self.state.observacoes_bloqueadas),
+            "clientes_bloqueados": sorted(str(item) for item in self.state.clientes_bloqueados),
+            "pedidos_prog2": [str(item) for item in self.state.pedidos_prog2],
+            "motivos_linha": {str(k): v for k, v in self.state.motivos_linha.items()},
+            "motivos_item": dict(self.state.motivos_item),
+            "motivos_pedido": dict(self.state.motivos_pedido),
+            "motivos_observacao": dict(self.state.motivos_observacao),
+            "motivos_cliente": dict(self.state.motivos_cliente),
+        }
+
+    def salvar_estado_atual(self):
+        self.config["ultimo_csv"] = self.ultimo_arquivo_importado or ""
+        self.config["estado"] = self.gerar_estado_para_salvar()
+        self.config_manager.salvar(self.config)
+
+    def salvar_estado_manual(self):
+        self.salvar_estado_atual()
+
+        messagebox.showinfo(
+            "Estado salvo",
+            f"Estado salvo localmente em:\n{self.config_manager.config_path}"
+        )
+
+        self.set_status("Estado salvo localmente.")
+
+    def restaurar_estado_salvo(self):
+        if not self.state.tem_dados():
+            return
+
+        estado = self.config.get("estado", {})
+
+        df = self.state.df_original
+
+        ids_existentes = set(int(valor) for valor in df["ID Linha"].unique())
+        pedidos_existentes = set(str(valor) for valor in df["Pedido Texto"].unique())
+        itens_existentes = set(str(valor) for valor in df["Item Texto"].unique())
+
+        self.state.linhas_bloqueadas = {
+            int(item)
+            for item in estado.get("linhas_bloqueadas", [])
+            if int(item) in ids_existentes
+        }
+
+        self.state.codigos_itens_bloqueados = {
+            str(item)
+            for item in estado.get("codigos_itens_bloqueados", [])
+            if str(item) in itens_existentes
+        }
+
+        self.state.pedidos_bloqueados = {
+            str(item)
+            for item in estado.get("pedidos_bloqueados", [])
+            if str(item) in pedidos_existentes
+        }
+
+        self.state.observacoes_bloqueadas = {
+            str(item)
+            for item in estado.get("observacoes_bloqueadas", [])
+        }
+
+        self.state.clientes_bloqueados = {
+            str(item)
+            for item in estado.get("clientes_bloqueados", [])
+        }
+
+        self.state.pedidos_prog2 = [
+            str(item)
+            for item in estado.get("pedidos_prog2", [])
+            if str(item) in pedidos_existentes
+        ]
+
+        self.state.motivos_linha = {
+            int(k): v
+            for k, v in estado.get("motivos_linha", {}).items()
+            if str(k).isdigit() and int(k) in ids_existentes
+        }
+
+        self.state.motivos_item = dict(estado.get("motivos_item", {}))
+        self.state.motivos_pedido = dict(estado.get("motivos_pedido", {}))
+        self.state.motivos_observacao = dict(estado.get("motivos_observacao", {}))
+        self.state.motivos_cliente = dict(estado.get("motivos_cliente", {}))
 
     def registrar_erro(self, contexto, erro):
         data = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
@@ -194,6 +336,9 @@ class MainWindow:
             arquivo.write(traceback.format_exc())
             arquivo.write("\n")
 
+    def abrir_config(self):
+        self.abrir_arquivo(str(self.config_manager.config_path))
+
     def abrir_log(self):
         if not self.log_path.exists():
             self.log_path.write_text("Nenhum erro registrado até o momento.\n", encoding="utf-8")
@@ -205,6 +350,7 @@ class MainWindow:
             "Sobre",
             "CarteiraOps\n\n"
             "Aplicativo desktop para consolidação, bloqueio e programação de carteira de pedidos.\n\n"
+            f"Configuração local:\n{self.config_manager.config_path}\n\n"
             f"Log local:\n{self.log_path}"
         )
 
@@ -236,7 +382,7 @@ class MainWindow:
         if not self.ultimo_arquivo_importado:
             messagebox.showwarning(
                 "Nenhum arquivo anterior",
-                "Ainda não existe um CSV carregado nesta sessão."
+                "Ainda não existe um CSV salvo no estado local."
             )
             return
 
@@ -256,14 +402,18 @@ class MainWindow:
 
             df = carregar_carteira(caminho)
             self.state.carregar_dataframe(df)
+
             self.ultimo_arquivo_importado = caminho
 
+            self.restaurar_estado_salvo()
             self.refresh_all()
+            self.salvar_estado_atual()
 
             self.set_status(
                 f"Arquivo importado com sucesso: {caminho} | "
                 f"Linhas: {len(df)} | "
-                f"Pedidos: {df['Pedido'].nunique()}"
+                f"Pedidos: {df['Pedido'].nunique()} | "
+                f"Estado local restaurado."
             )
 
         except Exception as erro:
@@ -332,6 +482,245 @@ class MainWindow:
                 text=str(valores.get(campo, "-")),
                 style=estilos.get(campo, "KpiValue.TLabel")
             )
+
+    def obter_presets(self, tipo):
+        return self.config.setdefault("presets", {}).setdefault(tipo, {})
+
+    def pedir_nome_preset(self, titulo):
+        nome = simpledialog.askstring(
+            titulo,
+            "Digite o nome do preset:",
+            parent=self.root
+        )
+
+        if not nome:
+            return None
+
+        nome = nome.strip()
+
+        if not nome:
+            return None
+
+        return nome
+
+    def criar_preset_itens(self):
+        if not self.state.codigos_itens_bloqueados:
+            messagebox.showwarning(
+                "Nenhum item bloqueado",
+                "Bloqueie os itens desejados antes de criar um preset."
+            )
+            return
+
+        nome = self.pedir_nome_preset("Criar preset de itens")
+
+        if not nome:
+            return
+
+        presets = self.obter_presets("itens")
+        presets[nome] = sorted(str(item) for item in self.state.codigos_itens_bloqueados)
+
+        self.config_manager.salvar(self.config)
+
+        messagebox.showinfo(
+            "Preset salvo",
+            f"Preset de itens salvo:\n{nome}"
+        )
+
+        self.set_status(f"Preset de itens salvo: {nome}")
+
+    def criar_preset_clientes(self):
+        if not self.state.clientes_bloqueados:
+            messagebox.showwarning(
+                "Nenhum cliente bloqueado",
+                "Bloqueie os clientes desejados antes de criar um preset."
+            )
+            return
+
+        nome = self.pedir_nome_preset("Criar preset de clientes")
+
+        if not nome:
+            return
+
+        presets = self.obter_presets("clientes")
+        presets[nome] = sorted(str(item) for item in self.state.clientes_bloqueados)
+
+        self.config_manager.salvar(self.config)
+
+        messagebox.showinfo(
+            "Preset salvo",
+            f"Preset de clientes salvo:\n{nome}"
+        )
+
+        self.set_status(f"Preset de clientes salvo: {nome}")
+
+    def abrir_janela_presets(self, tipo):
+        presets = self.obter_presets(tipo)
+
+        if not presets:
+            messagebox.showwarning(
+                "Nenhum preset salvo",
+                f"Não existe preset de {tipo} salvo."
+            )
+            return
+
+        janela = tk.Toplevel(self.root)
+        janela.title(f"Presets de {tipo}")
+        janela.geometry("760x460")
+        janela.minsize(620, 380)
+        janela.transient(self.root)
+        janela.grab_set()
+
+        frame = ttk.Frame(janela, padding=10)
+        frame.pack(fill="both", expand=True)
+
+        ttk.Label(
+            frame,
+            text=f"Presets de {tipo}",
+            font=("Segoe UI", 12, "bold")
+        ).pack(anchor="w")
+
+        ttk.Label(
+            frame,
+            text="Selecione um preset para aplicar ou excluir.",
+            style="Subtitle.TLabel"
+        ).pack(anchor="w", pady=(2, 8))
+
+        corpo = ttk.Frame(frame)
+        corpo.pack(fill="both", expand=True)
+
+        lista = tk.Listbox(corpo, height=12)
+        lista.pack(side="left", fill="both", expand=False, padx=(0, 8))
+
+        preview = tk.Text(corpo, height=12, wrap="word")
+        preview.pack(side="left", fill="both", expand=True)
+
+        nomes = sorted(presets.keys())
+
+        for nome in nomes:
+            lista.insert("end", nome)
+
+        def preset_selecionado():
+            selecao = lista.curselection()
+
+            if not selecao:
+                return None
+
+            return lista.get(selecao[0])
+
+        def atualizar_preview(event=None):
+            nome = preset_selecionado()
+
+            preview.delete("1.0", "end")
+
+            if not nome:
+                return
+
+            valores = presets.get(nome, [])
+
+            linhas = [
+                f"Preset: {nome}",
+                f"Tipo: {tipo}",
+                f"Quantidade: {len(valores)}",
+                "",
+                "Itens/clientes salvos:",
+                "",
+            ]
+
+            for valor in valores:
+                if tipo == "clientes":
+                    linhas.append(f"- {self.state.abreviar_cliente(valor)} | {valor}")
+                else:
+                    linhas.append(f"- {valor}")
+
+            preview.insert("1.0", "\n".join(linhas))
+
+        def aplicar_preset():
+            if not self.state.tem_dados():
+                messagebox.showwarning(
+                    "Nenhum CSV importado",
+                    "Importe a carteira antes de aplicar um preset."
+                )
+                return
+
+            nome = preset_selecionado()
+
+            if not nome:
+                messagebox.showwarning(
+                    "Nenhum preset selecionado",
+                    "Selecione um preset."
+                )
+                return
+
+            valores = presets.get(nome, [])
+
+            if tipo == "itens":
+                self.state.bloquear_itens_globais(valores, "")
+            else:
+                self.state.bloquear_clientes(valores, "")
+
+            self.refresh_all()
+            self.salvar_estado_atual()
+
+            self.set_status(f"Preset aplicado: {nome}")
+            janela.destroy()
+
+        def excluir_preset():
+            nome = preset_selecionado()
+
+            if not nome:
+                messagebox.showwarning(
+                    "Nenhum preset selecionado",
+                    "Selecione um preset."
+                )
+                return
+
+            confirmar = messagebox.askyesno(
+                "Excluir preset",
+                f"Deseja excluir o preset?\n\n{nome}"
+            )
+
+            if not confirmar:
+                return
+
+            presets.pop(nome, None)
+            self.config_manager.salvar(self.config)
+
+            lista.delete(0, "end")
+
+            for nome_preset in sorted(presets.keys()):
+                lista.insert("end", nome_preset)
+
+            preview.delete("1.0", "end")
+            self.set_status(f"Preset excluído: {nome}")
+
+        lista.bind("<<ListboxSelect>>", atualizar_preview)
+
+        frame_botoes = ttk.Frame(frame)
+        frame_botoes.pack(fill="x", pady=(10, 0))
+
+        ttk.Button(
+            frame_botoes,
+            text="Aplicar preset",
+            command=aplicar_preset,
+            style="Primary.TButton"
+        ).pack(side="left", padx=(0, 5))
+
+        ttk.Button(
+            frame_botoes,
+            text="Excluir preset",
+            command=excluir_preset,
+            style="Danger.TButton"
+        ).pack(side="left", padx=5)
+
+        ttk.Button(
+            frame_botoes,
+            text="Fechar",
+            command=janela.destroy
+        ).pack(side="right")
+
+        if nomes:
+            lista.selection_set(0)
+            atualizar_preview()
 
     def abrir_janela_checkbox(
         self,
@@ -413,6 +802,7 @@ class MainWindow:
                         variaveis[chave].set(True)
 
                     self.refresh_all()
+                    self.salvar_estado_atual()
                     self.set_status(f"{preset_nome} aplicado.")
                 else:
                     ao_liberar(preset_chaves_presentes)
@@ -421,6 +811,7 @@ class MainWindow:
                         variaveis[chave].set(False)
 
                     self.refresh_all()
+                    self.salvar_estado_atual()
                     self.set_status(f"{preset_nome} removido.")
 
             ttk.Checkbutton(
@@ -552,7 +943,6 @@ class MainWindow:
                 )
 
                 check.bind("<Enter>", ativar_scroll_mouse)
-                check.bind("<Leave>", lambda event: None)
 
             frame_checks.update_idletasks()
             atualizar_scroll_region()
@@ -604,6 +994,7 @@ class MainWindow:
 
             ao_bloquear(selecionados)
             self.refresh_all()
+            self.salvar_estado_atual()
             janela.destroy()
             self.set_status("Bloqueios atualizados.")
 
@@ -622,6 +1013,7 @@ class MainWindow:
 
             ao_liberar(selecionados)
             self.refresh_all()
+            self.salvar_estado_atual()
             janela.destroy()
             self.set_status("Bloqueios atualizados.")
 
@@ -660,6 +1052,7 @@ class MainWindow:
 
         self.state.bloquear_linha(id_linha, "")
         self.refresh_all()
+        self.salvar_estado_atual()
         self.set_status("Item selecionado bloqueado para faturamento.")
 
     def bloquear_pedido_selecionado(self):
@@ -678,6 +1071,7 @@ class MainWindow:
 
         self.state.bloquear_pedido(pedido, "")
         self.refresh_all()
+        self.salvar_estado_atual()
         self.set_status(f"Pedido {pedido} bloqueado para faturamento.")
 
     def bloquear_item_global(self):
@@ -698,6 +1092,7 @@ class MainWindow:
         self.pedidos_tab.set_codigo_item_global(codigo)
 
         self.refresh_all()
+        self.salvar_estado_atual()
         self.set_status(f"Item {codigo} bloqueado na carteira inteira.")
 
     def liberar_item_global(self):
@@ -713,6 +1108,7 @@ class MainWindow:
         self.state.liberar_item_global(codigo)
 
         self.refresh_all()
+        self.salvar_estado_atual()
         self.set_status(f"Item {codigo} liberado na carteira inteira.")
 
     def adicionar_pedido_selecionado_prog2(self):
@@ -731,6 +1127,7 @@ class MainWindow:
 
         self.state.adicionar_pedido_prog2(pedido)
         self.refresh_all()
+        self.salvar_estado_atual()
         self.set_status(f"Pedido {pedido} adicionado ao PROG 2.")
 
     def remover_pedido_selecionado_prog2(self):
@@ -742,6 +1139,7 @@ class MainWindow:
 
         self.state.remover_pedido_prog2(pedido)
         self.refresh_all()
+        self.salvar_estado_atual()
         self.set_status(f"Pedido {pedido} removido do PROG 2.")
 
     def limpar_prog2(self):
@@ -755,6 +1153,7 @@ class MainWindow:
 
         self.state.limpar_prog2()
         self.refresh_all()
+        self.salvar_estado_atual()
         self.set_status("PROG 2 limpo.")
 
     def abrir_janela_bloqueio_observacao(self):
@@ -1035,6 +1434,7 @@ class MainWindow:
                     self.state.liberar_observacao(observacao)
 
             self.refresh_all()
+            self.salvar_estado_atual()
             self.set_status(f"Pedido {pedido} liberado.")
             return
 
@@ -1091,6 +1491,7 @@ class MainWindow:
             self.state.liberar_linha(id_linha)
 
         self.refresh_all()
+        self.salvar_estado_atual()
         self.set_status("Seleção liberada.")
 
     def liberar_bloqueio_na_aba(self):
@@ -1147,6 +1548,7 @@ class MainWindow:
             self.state.liberar_linha(id_linha)
 
         self.refresh_all()
+        self.salvar_estado_atual()
         self.set_status("Bloqueio removido.")
 
     def limpar_todos_bloqueios(self):
@@ -1171,6 +1573,7 @@ class MainWindow:
 
         self.state.limpar_bloqueios()
         self.refresh_all()
+        self.salvar_estado_atual()
         self.set_status("Todos os bloqueios foram removidos.")
 
     def exportar_excel(self):
