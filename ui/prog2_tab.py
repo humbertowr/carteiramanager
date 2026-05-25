@@ -94,6 +94,13 @@ class Prog2Tab:
             style="Danger.TButton"
         ).grid(row=0, column=5, sticky="w", padx=3)
 
+        ttk.Button(
+            frame_topo,
+            text="Fechar Faturamento",
+            command=self.controller.fechar_faturamento_prog2,
+            style="Primary.TButton"
+        ).grid(row=0, column=6, sticky="w", padx=(10, 3))
+
         self.criar_menu_exportacao(
             frame_topo,
             texto="Itens liberados",
@@ -116,9 +123,9 @@ class Prog2Tab:
             frame_topo,
             text="Use a coluna Sel. para marcar pedidos. Clique nos cabeçalhos para ordenar.",
             style="Hint.TLabel"
-        ).grid(row=1, column=2, columnspan=4, sticky="w", padx=(12, 0), pady=(6, 0))
+        ).grid(row=1, column=2, columnspan=5, sticky="w", padx=(12, 0), pady=(6, 0))
 
-        frame_topo.columnconfigure(6, weight=1)
+        frame_topo.columnconfigure(7, weight=1)
 
     def criar_menu_exportacao(self, parent, texto, comando_excel, comando_pdf, row, column):
         menu_button = ttk.Menubutton(parent, text=f"Exportar {texto} ▾")
@@ -402,7 +409,11 @@ class Prog2Tab:
             self.atualizar_labels(0, 0, 0, 0)
             return
 
-        df = self.state.df_com_bloqueios(self.state.df_aberto())
+        if hasattr(self.controller, "obter_df_com_bloqueios_cache"):
+            df = self.controller.obter_df_com_bloqueios_cache()
+        else:
+            df = self.state.df_com_bloqueios(self.state.df_aberto())
+
         termo = self.busca_var.get().strip().lower()
 
         pedidos_processados = []

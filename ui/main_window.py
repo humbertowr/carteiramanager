@@ -23,6 +23,7 @@ from core.formatters import formatar_moeda, formatar_numero
 from ui.styles import configurar_estilo
 from ui.pedidos_tab import PedidosTab
 from ui.prog2_tab import Prog2Tab
+from ui.faturados_tab import FaturadosTab
 from ui.atrasados_tab import AtrasadosTab
 from ui.bloqueios_tab import BloqueiosTab
 from ui.consolidacoes_tab import ConsolidacoesTab
@@ -39,6 +40,8 @@ class MainWindow:
         configurar_estilo()
 
         self.state = AppState()
+        self.state.pedidos_faturados = set()
+        self.state.datas_faturamento_pedido = {}
         self.labels_resumo = {}
 
         self.config_manager = ConfigManager()
@@ -208,18 +211,21 @@ class MainWindow:
 
         aba_pedidos = ttk.Frame(self.abas)
         aba_prog2 = ttk.Frame(self.abas)
+        aba_faturados = ttk.Frame(self.abas)
         aba_atrasados = ttk.Frame(self.abas)
         aba_bloqueios = ttk.Frame(self.abas)
         aba_consolidacoes = ttk.Frame(self.abas)
 
         self.abas.add(aba_pedidos, text="Pedidos")
         self.abas.add(aba_prog2, text="PROG 2")
+        self.abas.add(aba_faturados, text="Faturados")
         self.abas.add(aba_atrasados, text="Atrasados")
         self.abas.add(aba_bloqueios, text="Bloqueios")
         self.abas.add(aba_consolidacoes, text="Consolidações")
 
         self.pedidos_tab = PedidosTab(aba_pedidos, self, self.state)
         self.prog2_tab = Prog2Tab(aba_prog2, self, self.state)
+        self.faturados_tab = FaturadosTab(aba_faturados, self, self.state)
         self.atrasados_tab = AtrasadosTab(aba_atrasados, self, self.state)
         self.bloqueios_tab = BloqueiosTab(aba_bloqueios, self, self.state)
         self.consolidacoes_tab = ConsolidacoesTab(aba_consolidacoes, self, self.state)
@@ -230,6 +236,7 @@ class MainWindow:
         abas = [
             getattr(self, "pedidos_tab", None),
             getattr(self, "prog2_tab", None),
+            getattr(self, "faturados_tab", None),
             getattr(self, "atrasados_tab", None),
             getattr(self, "bloqueios_tab", None),
             getattr(self, "consolidacoes_tab", None),
@@ -270,7 +277,14 @@ class MainWindow:
             return pd.DataFrame()
 
         if "df_aberto" not in self._cache:
-            self._cache["df_aberto"] = self.state.df_aberto()
+            df = self.state.df_aberto().copy()
+            pedidos_faturados = set(str(pedido) for pedido in getattr(self.state, "pedidos_faturados", set()))
+
+            if pedidos_faturados and not df.empty:
+                coluna_pedido = "Pedido Texto" if "Pedido Texto" in df.columns else "Pedido"
+                df = df[~df[coluna_pedido].astype(str).isin(pedidos_faturados)].copy()
+
+            self._cache["df_aberto"] = df
 
         return self._cache["df_aberto"]
 
@@ -298,6 +312,8 @@ class MainWindow:
             "observacoes_bloqueadas": sorted(str(item) for item in self.state.observacoes_bloqueadas),
             "clientes_bloqueados": sorted(str(item) for item in self.state.clientes_bloqueados),
             "pedidos_prog2": [str(item) for item in self.state.pedidos_prog2],
+            "pedidos_faturados": sorted(str(item) for item in getattr(self.state, "pedidos_faturados", set())),
+            "datas_faturamento_pedido": {str(k): str(v) for k, v in getattr(self.state, "datas_faturamento_pedido", {}).items()},
             "motivos_linha": {str(k): v for k, v in self.state.motivos_linha.items()},
             "motivos_item": dict(self.state.motivos_item),
             "motivos_pedido": dict(self.state.motivos_pedido),
@@ -362,10 +378,21 @@ class MainWindow:
             for item in estado.get("clientes_bloqueados", [])
         }
 
+        self.state.pedidos_faturados = {
+            str(item)
+            for item in estado.get("pedidos_faturados", [])
+        }
+
+        self.state.datas_faturamento_pedido = {
+            str(k): str(v)
+            for k, v in estado.get("datas_faturamento_pedido", {}).items()
+        }
+
         self.state.pedidos_prog2 = [
             str(item)
             for item in estado.get("pedidos_prog2", [])
             if str(item) in pedidos_existentes
+            and str(item) not in self.state.pedidos_faturados
         ]
 
         self.state.motivos_linha = {
@@ -526,6 +553,7 @@ class MainWindow:
         self.atualizar_resumo()
         self.pedidos_tab.refresh()
         self.prog2_tab.refresh()
+        self.faturados_tab.refresh()
         self.atrasados_tab.refresh()
         self.bloqueios_tab.refresh()
         self.consolidacoes_tab.refresh()
@@ -534,6 +562,7 @@ class MainWindow:
     def refresh_pedidos(self):
         self.pedidos_tab.refresh()
         self.prog2_tab.refresh()
+        self.faturados_tab.refresh()
         self.atrasados_tab.refresh()
         self.atualizar_resumo()
         self.aplicar_ordenacao_tabelas()
@@ -1291,6 +1320,84 @@ class MainWindow:
         self.salvar_estado_atual()
         self.set_status("PROG 2 limpo.")
 
+    def fechar_faturamento_prog2(self):
+        if not self.state.tem_dados():
+            messagebox.showwarning("Nenhum arquivo", "Importe um CSV primeiro.")
+            return
+
+        pedidos_prog2 = [str(pedido) for pedido in self.state.pedidos_prog2]
+
+        if not pedidos_prog2:
+            messagebox.showwarning("PROG 2 vazio", "Não há pedidos no PROG 2 para fechar faturamento.")
+            return
+
+        df_prog2 = self.gerar_df_prog2_pedidos_liberados()
+        valor_liberado = 0
+
+        if df_prog2 is not None and not df_prog2.empty and "Valor Total Liberado" in df_prog2.columns:
+            valor_liberado = df_prog2["Valor Total Liberado"].sum()
+
+        confirmar = messagebox.askyesno(
+            "Fechar faturamento",
+            "Deseja marcar todos os pedidos do PROG 2 como faturados?\n\n"
+            f"Pedidos: {len(pedidos_prog2)}\n"
+            f"Valor liberado: {formatar_moeda(valor_liberado)}\n\n"
+            "Após confirmar, eles sairão do PROG 2 e não aparecerão mais na carteira de pedidos nas próximas importações."
+        )
+
+        if not confirmar:
+            return
+
+        data_faturamento = datetime.now().strftime("%d/%m/%Y %H:%M")
+
+        if not hasattr(self.state, "pedidos_faturados"):
+            self.state.pedidos_faturados = set()
+
+        if not hasattr(self.state, "datas_faturamento_pedido"):
+            self.state.datas_faturamento_pedido = {}
+
+        for pedido in pedidos_prog2:
+            self.state.pedidos_faturados.add(str(pedido))
+            self.state.datas_faturamento_pedido[str(pedido)] = data_faturamento
+
+        self.state.limpar_prog2()
+        self.invalidar_cache()
+        self.refresh_all()
+        self.salvar_estado_atual()
+
+        self.set_status(f"Faturamento fechado: {len(pedidos_prog2)} pedido(s) marcados como faturados.")
+
+    def remover_pedido_faturado(self, pedido):
+        pedido = str(pedido)
+
+        if not hasattr(self.state, "pedidos_faturados"):
+            self.state.pedidos_faturados = set()
+
+        if not hasattr(self.state, "datas_faturamento_pedido"):
+            self.state.datas_faturamento_pedido = {}
+
+        if pedido not in self.state.pedidos_faturados:
+            self.set_status("Pedido não está marcado como faturado.")
+            return
+
+        confirmar = messagebox.askyesno(
+            "Remover do faturamento",
+            f"Deseja remover o pedido {pedido} da lista de faturados?\n\n"
+            "Se ele ainda existir na carteira CSV atual, voltará a aparecer na aba Pedidos."
+        )
+
+        if not confirmar:
+            return
+
+        self.state.pedidos_faturados.discard(pedido)
+        self.state.datas_faturamento_pedido.pop(pedido, None)
+
+        self.invalidar_cache()
+        self.refresh_all()
+        self.salvar_estado_atual()
+
+        self.set_status(f"Pedido {pedido} removido da lista de faturados.")
+
     def abrir_janela_bloqueio_observacao(self):
         if not self.state.tem_dados():
             messagebox.showwarning("Nenhum arquivo", "Importe um CSV primeiro.")
@@ -1802,6 +1909,8 @@ class MainWindow:
             df_exportar = self.state.gerar_df_pedidos_ajustados()
         elif aba_atual == "PROG 2":
             df_exportar = self.state.gerar_df_prog2()
+        elif aba_atual == "Faturados":
+            df_exportar = self.faturados_tab.get_current_df()
         elif aba_atual == "Atrasados":
             df_exportar = self.atrasados_tab.get_current_df()
         elif aba_atual == "Bloqueios":
