@@ -1,0 +1,8 @@
+{
+  "modo_compartilhado": true,
+  "usuario": "Humberto",
+  "pasta_dados": "\\\\server-file\\PCP\\CarteiraManager\\data",
+  "pasta_backups": "\\\\server-file\\PCP\\CarteiraManager\\backups",
+  "pasta_exports": "\\\\server-file\\PCP\\CarteiraManager\\exports",
+  "pasta_logs": "\\\\server-file\\PCP\\CarteiraManager\\logs"
+}

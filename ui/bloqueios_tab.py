@@ -3,6 +3,8 @@ from tkinter import ttk
 
 from core.formatters import formatar_moeda, formatar_numero
 from ui.styles import configurar_tags_tabela
+from ui.sortable_tree import aplicar_ordenacao_treeview
+from ui.ux_helpers import aplicar_menu_generico_tabela
 
 
 class BloqueiosTab:
@@ -19,7 +21,7 @@ class BloqueiosTab:
         self.criar_interface()
 
     def criar_interface(self):
-        container = ttk.Frame(self.parent, padding=(8, 6))
+        container = ttk.Frame(self.parent, padding=(10, 8))
         container.pack(fill="both", expand=True)
 
         self.criar_topo(container)
@@ -34,13 +36,13 @@ class BloqueiosTab:
         )
         frame_topo.pack(fill="x", pady=(0, 6))
 
-        ttk.Label(frame_topo, text="Busca geral").grid(row=0, column=0, sticky="w", padx=(0, 5))
+        ttk.Label(frame_topo, text="Buscar", style="Hint.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 5))
 
-        entrada = ttk.Entry(frame_topo, textvariable=self.busca_var, width=34)
-        entrada.grid(row=0, column=1, sticky="w", padx=(0, 12))
-        entrada.bind("<KeyRelease>", lambda event: self.refresh())
+        self.entrada_busca = ttk.Entry(frame_topo, textvariable=self.busca_var, width=34)
+        self.entrada_busca.grid(row=0, column=1, sticky="w", padx=(0, 12))
+        self.entrada_busca.bind("<KeyRelease>", lambda event: self.refresh())
 
-        ttk.Label(frame_topo, text="Tipo").grid(row=0, column=2, sticky="w", padx=(0, 5))
+        ttk.Label(frame_topo, text="Tipo", style="Hint.TLabel").grid(row=0, column=2, sticky="w", padx=(0, 5))
 
         combo = ttk.Combobox(
             frame_topo,
@@ -62,7 +64,8 @@ class BloqueiosTab:
         ttk.Button(
             frame_topo,
             text="Liberar selecionado",
-            command=self.controller.liberar_bloqueio_na_aba
+            command=self.controller.liberar_bloqueio_na_aba,
+            style="Success.TButton"
         ).grid(row=0, column=4, sticky="w", padx=3)
 
         ttk.Button(
@@ -74,7 +77,7 @@ class BloqueiosTab:
 
         ttk.Label(
             frame_topo,
-            text="Use esta aba para revisar e remover bloqueios aplicados na carteira.",
+            text="Revise bloqueios por pedido, item, cliente ou observação. Clique nos cabeçalhos para ordenar.",
             style="Hint.TLabel"
         ).grid(row=1, column=0, columnspan=6, sticky="w", pady=(6, 0))
 
@@ -83,7 +86,7 @@ class BloqueiosTab:
     def criar_tabela(self, parent):
         frame_tabela = ttk.LabelFrame(
             parent,
-            text="Itens bloqueados",
+            text="Lista de bloqueios",
             padding=(8, 6),
             style="Section.TLabelframe"
         )
@@ -127,6 +130,7 @@ class BloqueiosTab:
             )
 
         configurar_tags_tabela(self.tabela)
+        aplicar_ordenacao_treeview(self.tabela)
 
         scroll_y = ttk.Scrollbar(frame_tabela, orient="vertical", command=self.tabela.yview)
         scroll_x = ttk.Scrollbar(frame_tabela, orient="horizontal", command=self.tabela.xview)
@@ -139,6 +143,12 @@ class BloqueiosTab:
 
         frame_tabela.rowconfigure(0, weight=1)
         frame_tabela.columnconfigure(0, weight=1)
+        aplicar_menu_generico_tabela(self, "Bloqueios")
+
+    def focar_busca(self):
+        if hasattr(self, "entrada_busca"):
+            self.entrada_busca.focus_set()
+            self.entrada_busca.selection_range(0, "end")
 
     def refresh(self):
         self.tabela.delete(*self.tabela.get_children())

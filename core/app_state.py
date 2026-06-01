@@ -96,6 +96,7 @@ def abreviar_grupo_faturamento(valor):
 class AppState:
     def __init__(self):
         self.df_original = None
+        self._versao_estado = 0
 
         self.linhas_bloqueadas = set()
         self.codigos_itens_bloqueados = set()
@@ -104,12 +105,22 @@ class AppState:
         self.clientes_bloqueados = set()
 
         self.pedidos_prog2 = []
+        self.pedidos_faturados = set()
+        self.datas_faturamento_pedido = {}
+        self.pendencias_prog2 = {}
 
         self.motivos_linha = {}
         self.motivos_item = {}
         self.motivos_pedido = {}
         self.motivos_observacao = {}
         self.motivos_cliente = {}
+
+    @property
+    def versao_estado(self):
+        return self._versao_estado
+
+    def marcar_estado_alterado(self):
+        self._versao_estado += 1
 
     def carregar_dataframe(self, df):
         df = df.copy()
@@ -129,12 +140,16 @@ class AppState:
         self.observacoes_bloqueadas.clear()
         self.clientes_bloqueados.clear()
         self.pedidos_prog2.clear()
+        self.pedidos_faturados.clear()
+        self.datas_faturamento_pedido.clear()
+        self.pendencias_prog2.clear()
 
         self.motivos_linha.clear()
         self.motivos_item.clear()
         self.motivos_pedido.clear()
         self.motivos_observacao.clear()
         self.motivos_cliente.clear()
+        self.marcar_estado_alterado()
 
     def tem_dados(self):
         return self.df_original is not None
@@ -391,7 +406,7 @@ class AppState:
 
         return df["_Valor Bloqueado"].sum()
 
-    def calcular_totais_prog2(self):
+    def calcular_totais_prog2(self, df_com_bloqueios=None):
         if self.df_original is None:
             return {
                 "pedidos": 0,
@@ -412,7 +427,11 @@ class AppState:
                 "valor_liberado": 0,
             }
 
-        df = self.df_com_bloqueios(self.df_aberto())
+        if df_com_bloqueios is None:
+            df = self.df_com_bloqueios(self.df_aberto())
+        else:
+            df = df_com_bloqueios.copy()
+
         df = df[df["Pedido Texto"].isin(pedidos_prog2)]
 
         if df.empty:
@@ -526,42 +545,70 @@ class AppState:
 
     def bloquear_linha(self, id_linha, motivo=""):
         id_linha = int(id_linha)
+        antes = id_linha in self.linhas_bloqueadas
         self.linhas_bloqueadas.add(id_linha)
 
         if motivo:
             self.motivos_linha[id_linha] = motivo
 
+        if not antes or motivo:
+            self.marcar_estado_alterado()
+
     def bloquear_pedido(self, pedido, motivo=""):
         pedido = str(pedido)
+        antes = pedido in self.pedidos_bloqueados
         self.pedidos_bloqueados.add(pedido)
 
         if motivo:
             self.motivos_pedido[pedido] = motivo
 
+        if not antes or motivo:
+            self.marcar_estado_alterado()
+
     def bloquear_item_global(self, codigo_item, motivo=""):
         codigo_item = str(codigo_item)
+        antes = codigo_item in self.codigos_itens_bloqueados
         self.codigos_itens_bloqueados.add(codigo_item)
 
         if motivo:
             self.motivos_item[codigo_item] = motivo
+
+        if not antes or motivo:
+            self.marcar_estado_alterado()
 
     def bloquear_itens_globais(self, codigos_itens, motivo=""):
         for codigo_item in codigos_itens:
             self.bloquear_item_global(codigo_item, motivo)
 
     def bloquear_observacoes(self, observacoes, motivo=""):
+        alterou = False
+
         for observacao in observacoes:
             observacao = str(observacao)
+
+            if observacao not in self.observacoes_bloqueadas:
+                alterou = True
+
             self.observacoes_bloqueadas.add(observacao)
 
             if motivo:
                 self.motivos_observacao[observacao] = motivo
+                alterou = True
             else:
                 self.motivos_observacao[observacao] = f"Bloqueado por observação: {observacao}"
 
+        if alterou:
+            self.marcar_estado_alterado()
+
     def bloquear_clientes(self, clientes_chave, motivo=""):
+        alterou = False
+
         for cliente_chave in clientes_chave:
             cliente_chave = str(cliente_chave)
+
+            if cliente_chave not in self.clientes_bloqueados:
+                alterou = True
+
             self.clientes_bloqueados.add(cliente_chave)
 
             nome_curto = CLIENTES_BLOQUEADOS_1.get(
@@ -571,23 +618,39 @@ class AppState:
 
             if motivo:
                 self.motivos_cliente[cliente_chave] = motivo
+                alterou = True
             else:
                 self.motivos_cliente[cliente_chave] = f"Bloqueado por cliente: {nome_curto}"
 
+        if alterou:
+            self.marcar_estado_alterado()
+
     def liberar_linha(self, id_linha):
         id_linha = int(id_linha)
+        alterou = id_linha in self.linhas_bloqueadas or id_linha in self.motivos_linha
         self.linhas_bloqueadas.discard(id_linha)
         self.motivos_linha.pop(id_linha, None)
 
+        if alterou:
+            self.marcar_estado_alterado()
+
     def liberar_pedido(self, pedido):
         pedido = str(pedido)
+        alterou = pedido in self.pedidos_bloqueados or pedido in self.motivos_pedido
         self.pedidos_bloqueados.discard(pedido)
         self.motivos_pedido.pop(pedido, None)
 
+        if alterou:
+            self.marcar_estado_alterado()
+
     def liberar_item_global(self, codigo_item):
         codigo_item = str(codigo_item)
+        alterou = codigo_item in self.codigos_itens_bloqueados or codigo_item in self.motivos_item
         self.codigos_itens_bloqueados.discard(codigo_item)
         self.motivos_item.pop(codigo_item, None)
+
+        if alterou:
+            self.marcar_estado_alterado()
 
     def liberar_itens_globais(self, codigos_itens):
         for codigo_item in codigos_itens:
@@ -595,15 +658,37 @@ class AppState:
 
     def liberar_observacao(self, observacao):
         observacao = str(observacao)
+        alterou = observacao in self.observacoes_bloqueadas or observacao in self.motivos_observacao
         self.observacoes_bloqueadas.discard(observacao)
         self.motivos_observacao.pop(observacao, None)
 
+        if alterou:
+            self.marcar_estado_alterado()
+
     def liberar_cliente(self, cliente_chave):
         cliente_chave = str(cliente_chave)
+        alterou = cliente_chave in self.clientes_bloqueados or cliente_chave in self.motivos_cliente
         self.clientes_bloqueados.discard(cliente_chave)
         self.motivos_cliente.pop(cliente_chave, None)
 
+        if alterou:
+            self.marcar_estado_alterado()
+
     def limpar_bloqueios(self):
+        alterou = (
+            self.linhas_bloqueadas
+            or self.codigos_itens_bloqueados
+            or self.pedidos_bloqueados
+            or self.observacoes_bloqueadas
+            or self.clientes_bloqueados
+            or self.motivos_linha
+            or self.motivos_item
+            or self.motivos_pedido
+            or self.motivos_observacao
+            or self.motivos_cliente
+            or self.pendencias_prog2
+        )
+
         self.linhas_bloqueadas.clear()
         self.codigos_itens_bloqueados.clear()
         self.pedidos_bloqueados.clear()
@@ -615,23 +700,86 @@ class AppState:
         self.motivos_pedido.clear()
         self.motivos_observacao.clear()
         self.motivos_cliente.clear()
+        self.pendencias_prog2.clear()
+
+        if alterou:
+            self.marcar_estado_alterado()
 
     def adicionar_pedido_prog2(self, pedido):
         pedido = str(pedido)
 
         if pedido not in self.pedidos_prog2:
             self.pedidos_prog2.append(pedido)
+            self.marcar_estado_alterado()
 
     def remover_pedido_prog2(self, pedido):
         pedido = str(pedido)
+        tamanho_anterior = len(self.pedidos_prog2)
 
         self.pedidos_prog2 = [
             p for p in self.pedidos_prog2
             if str(p) != pedido
         ]
 
+        if len(self.pedidos_prog2) != tamanho_anterior:
+            self.remover_pendencias_do_pedido(pedido, marcar_alterado=False)
+            self.marcar_estado_alterado()
+
+    def remover_pendencias_do_pedido(self, pedido, marcar_alterado=True):
+        if self.df_original is None:
+            return
+
+        pedido = str(pedido)
+        ids_pedido = set(
+            int(valor)
+            for valor in self.df_original.loc[self.df_original["Pedido Texto"] == pedido, "ID Linha"].tolist()
+        )
+
+        alterou = False
+        for id_linha in list(self.pendencias_prog2.keys()):
+            try:
+                id_int = int(id_linha)
+            except (TypeError, ValueError):
+                continue
+            if id_int in ids_pedido:
+                self.pendencias_prog2.pop(id_linha, None)
+                alterou = True
+
+        if alterou and marcar_alterado:
+            self.marcar_estado_alterado()
+
     def limpar_prog2(self):
-        self.pedidos_prog2.clear()
+        if self.pedidos_prog2 or self.pendencias_prog2:
+            self.pedidos_prog2.clear()
+            self.pendencias_prog2.clear()
+            self.marcar_estado_alterado()
+
+    def definir_pendencia_item_prog2(self, id_linha, motivo):
+        try:
+            id_linha = int(id_linha)
+        except (TypeError, ValueError):
+            return False
+
+        motivo = str(motivo).strip()
+        if not motivo:
+            return False
+
+        self.pendencias_prog2[id_linha] = motivo
+        self.marcar_estado_alterado()
+        return True
+
+    def limpar_pendencia_item_prog2(self, id_linha):
+        try:
+            id_linha = int(id_linha)
+        except (TypeError, ValueError):
+            return False
+
+        if id_linha in self.pendencias_prog2:
+            self.pendencias_prog2.pop(id_linha, None)
+            self.marcar_estado_alterado()
+            return True
+
+        return False
 
     def gerar_df_pedidos_ajustados(self):
         if self.df_original is None:

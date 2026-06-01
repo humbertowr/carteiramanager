@@ -6,6 +6,8 @@ import pandas as pd
 from core.carteira_processor import obter_consolidacao
 from core.formatters import formatar_moeda, formatar_numero
 from ui.styles import configurar_tags_tabela
+from ui.sortable_tree import aplicar_ordenacao_treeview
+from ui.ux_helpers import aplicar_menu_generico_tabela
 
 
 class ConsolidacoesTab:
@@ -22,7 +24,7 @@ class ConsolidacoesTab:
         self.criar_interface()
 
     def criar_interface(self):
-        container = ttk.Frame(self.parent, padding=(8, 6))
+        container = ttk.Frame(self.parent, padding=(10, 8))
         container.pack(fill="both", expand=True)
 
         self.criar_topo(container)
@@ -37,7 +39,7 @@ class ConsolidacoesTab:
         )
         frame_topo.pack(fill="x", pady=(0, 6))
 
-        ttk.Label(frame_topo, text="Tipo de consolidação").grid(row=0, column=0, sticky="w", padx=(0, 5))
+        ttk.Label(frame_topo, text="Tipo", style="Hint.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 5))
 
         combo = ttk.Combobox(
             frame_topo,
@@ -55,21 +57,22 @@ class ConsolidacoesTab:
         combo.grid(row=0, column=1, sticky="w", padx=(0, 12))
         combo.bind("<<ComboboxSelected>>", lambda event: self.refresh())
 
-        ttk.Label(frame_topo, text="Busca geral").grid(row=0, column=2, sticky="w", padx=(0, 5))
+        ttk.Label(frame_topo, text="Buscar", style="Hint.TLabel").grid(row=0, column=2, sticky="w", padx=(0, 5))
 
-        entrada = ttk.Entry(frame_topo, textvariable=self.busca_var, width=34)
-        entrada.grid(row=0, column=3, sticky="w", padx=(0, 12))
-        entrada.bind("<KeyRelease>", lambda event: self.refresh())
+        self.entrada_busca = ttk.Entry(frame_topo, textvariable=self.busca_var, width=34)
+        self.entrada_busca.grid(row=0, column=3, sticky="w", padx=(0, 12))
+        self.entrada_busca.bind("<KeyRelease>", lambda event: self.refresh())
 
         ttk.Button(
             frame_topo,
             text="Atualizar",
-            command=self.refresh
+            command=self.refresh,
+            style="Compact.TButton"
         ).grid(row=0, column=4, sticky="w", padx=3)
 
         ttk.Label(
             frame_topo,
-            text="A exportação em CSV da aba atual usa esta visualização.",
+            text="A exportação em CSV usa exatamente a visualização filtrada nesta aba. Clique nos cabeçalhos para ordenar.",
             style="Hint.TLabel"
         ).grid(row=1, column=0, columnspan=5, sticky="w", pady=(6, 0))
 
@@ -87,6 +90,7 @@ class ConsolidacoesTab:
         self.tabela = ttk.Treeview(frame_tabela, show="headings")
 
         configurar_tags_tabela(self.tabela)
+        aplicar_ordenacao_treeview(self.tabela)
 
         self.scroll_y = ttk.Scrollbar(frame_tabela, orient="vertical", command=self.tabela.yview)
         self.scroll_x = ttk.Scrollbar(frame_tabela, orient="horizontal", command=self.tabela.xview)
@@ -99,6 +103,7 @@ class ConsolidacoesTab:
 
         frame_tabela.rowconfigure(0, weight=1)
         frame_tabela.columnconfigure(0, weight=1)
+        aplicar_menu_generico_tabela(self, "Consolidações")
 
     def configurar_colunas(self, df):
         colunas = list(df.columns)
@@ -127,6 +132,11 @@ class ConsolidacoesTab:
                 minwidth=90,
                 anchor="w"
             )
+
+    def focar_busca(self):
+        if hasattr(self, "entrada_busca"):
+            self.entrada_busca.focus_set()
+            self.entrada_busca.selection_range(0, "end")
 
     def refresh(self):
         self.tabela.delete(*self.tabela.get_children())
@@ -158,6 +168,7 @@ class ConsolidacoesTab:
             return
 
         self.configurar_colunas(df)
+        aplicar_ordenacao_treeview(self.tabela)
 
         for indice, (_, linha) in enumerate(df.iterrows(), start=1):
             valores = []

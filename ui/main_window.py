@@ -8,10 +8,8 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
 
-import pandas as pd
 
 from core.app_state import AppState, CLIENTES_BLOQUEIO_PADRAO
-from core.carteira_processor import carregar_carteira
 from core.config_manager import ConfigManager
 from core.exporter import (
     exportar_csv,
@@ -20,14 +18,20 @@ from core.exporter import (
     exportar_dataframe_pdf,
 )
 from core.formatters import formatar_moeda, formatar_numero
-from ui.styles import configurar_estilo
+from ui.styles import CORES, configurar_estilo
 from ui.pedidos_tab import PedidosTab
 from ui.prog2_tab import Prog2Tab
 from ui.faturados_tab import FaturadosTab
 from ui.atrasados_tab import AtrasadosTab
 from ui.bloqueios_tab import BloqueiosTab
 from ui.consolidacoes_tab import ConsolidacoesTab
+from ui.gargalos_tab import GargalosTab
 from ui.sortable_tree import aplicar_ordenacao_treeview
+from services.cache_service import CarteiraCacheService
+from services.estado_service import EstadoService
+from services.exportacao_service import ExportacaoService
+from services.faturamento_service import FaturamentoService
+from services.importacao_service import ImportacaoService
 
 
 class MainWindow:
@@ -38,19 +42,25 @@ class MainWindow:
         self.root.minsize(1180, 700)
 
         configurar_estilo()
+        try:
+            self.root.configure(background=CORES["bg"])
+        except Exception:
+            pass
 
         self.state = AppState()
-        self.state.pedidos_faturados = set()
-        self.state.datas_faturamento_pedido = {}
         self.labels_resumo = {}
+
+        self.cache_service = CarteiraCacheService(self.state)
+        self.estado_service = EstadoService()
+        self.exportacao_service = ExportacaoService()
+        self.faturamento_service = FaturamentoService(self.state)
+        self.importacao_service = ImportacaoService(self.state)
 
         self.config_manager = ConfigManager()
         self.config = self.config_manager.carregar()
 
         self.ultimo_arquivo_importado = self.config.get("ultimo_csv", "")
         self.observacoes_internas = self.config.setdefault("observacoes_internas", {})
-
-        self._cache = {}
 
         self.garantir_preset_padrao_clientes()
 
@@ -65,6 +75,81 @@ class MainWindow:
         self.criar_resumo()
         self.criar_abas()
         self.criar_barra_status()
+        self.registrar_atalhos()
+
+    def registrar_atalhos(self):
+        self.root.bind_all("<Control-f>", self.atalho_buscar)
+        self.root.bind_all("<Control-F>", self.atalho_buscar)
+        self.root.bind_all("<Control-e>", self.atalho_exportar)
+        self.root.bind_all("<Control-E>", self.atalho_exportar)
+        self.root.bind_all("<Control-r>", self.atalho_recarregar)
+        self.root.bind_all("<Control-R>", self.atalho_recarregar)
+        self.root.bind_all("<Delete>", self.atalho_delete)
+        self.root.bind_all("<Return>", self.atalho_enter)
+
+    def obter_aba_ativa(self):
+        if not hasattr(self, "abas"):
+            return None, None
+
+        texto = self.abas.tab(self.abas.select(), "text")
+        mapa = {
+            "Pedidos": getattr(self, "pedidos_tab", None),
+            "PROG 2": getattr(self, "prog2_tab", None),
+            "Faturados": getattr(self, "faturados_tab", None),
+            "Atrasados": getattr(self, "atrasados_tab", None),
+            "Bloqueios": getattr(self, "bloqueios_tab", None),
+            "Gargalos": getattr(self, "gargalos_tab", None),
+            "Consolidações": getattr(self, "consolidacoes_tab", None),
+        }
+        return texto, mapa.get(texto)
+
+    def atalho_buscar(self, event=None):
+        _, aba = self.obter_aba_ativa()
+        if aba and hasattr(aba, "focar_busca"):
+            aba.focar_busca()
+            return "break"
+
+        entrada = getattr(aba, "entrada_busca", None) if aba else None
+        if entrada is not None:
+            entrada.focus_set()
+            entrada.selection_range(0, "end")
+            return "break"
+        return None
+
+    def atalho_exportar(self, event=None):
+        self.exportar_csv_atual()
+        return "break"
+
+    def atalho_recarregar(self, event=None):
+        if self.ultimo_arquivo_importado:
+            self.recarregar_ultimo_csv()
+        else:
+            self.refresh_all()
+            self.set_status("Tela atualizada.")
+        return "break"
+
+    def atalho_delete(self, event=None):
+        nome_aba, aba = self.obter_aba_ativa()
+        if nome_aba == "PROG 2":
+            self.remover_pedido_selecionado_prog2()
+            return "break"
+        if nome_aba == "Bloqueios":
+            self.liberar_bloqueio_na_aba()
+            return "break"
+        if nome_aba == "Faturados" and hasattr(aba, "remover_selecionado"):
+            aba.remover_selecionado()
+            return "break"
+        return None
+
+    def atalho_enter(self, event=None):
+        _, aba = self.obter_aba_ativa()
+        widget_focado = self.root.focus_get()
+        if isinstance(widget_focado, (tk.Entry, ttk.Entry, ttk.Combobox)):
+            return None
+        if aba and hasattr(aba, "abrir_detalhes_selecionado"):
+            aba.abrir_detalhes_selecionado()
+            return "break"
+        return None
 
     def criar_topo(self):
         frame = ttk.Frame(self.root, padding=(12, 8), style="TopBar.TFrame")
@@ -79,6 +164,12 @@ class MainWindow:
             style="TopBarTitle.TLabel",
         ).pack(anchor="w")
 
+        ttk.Label(
+            bloco_titulo,
+            text="Carteira, bloqueios, PROG 2, faturamento e gargalos em uma visão única.",
+            style="TopBarSubtitle.TLabel",
+        ).pack(anchor="w", pady=(1, 0))
+
         bloco_menus = ttk.Frame(frame, style="TopBar.TFrame")
         bloco_menus.pack(side="right", padx=(12, 0))
 
@@ -92,11 +183,11 @@ class MainWindow:
             parent,
             tearoff=0,
             font=("Segoe UI", 9),
-            background="#ffffff",
-            foreground="#111827",
-            activebackground="#e0f2fe",
-            activeforeground="#0f172a",
-            relief="flat",
+            background=CORES["card"],
+            foreground=CORES["text"],
+            activebackground=CORES["primary_soft"],
+            activeforeground=CORES["text"],
+            relief="solid",
             borderwidth=1,
         )
         return menu
@@ -166,39 +257,38 @@ class MainWindow:
         frame = ttk.LabelFrame(
             self.root,
             text="Resumo geral",
-            padding=(6, 3),
+            padding=(6, 4),
             style="Kpi.TLabelframe"
         )
-        frame.pack(fill="x", padx=8, pady=(6, 5))
+        frame.pack(fill="x", padx=8, pady=(4, 4))
 
         campos = [
-            "Pedidos Abertos",
-            "Pedidos Bloqueados",
-            "Clientes Bloq.",
-            "Pedidos PROG 2",
-            "Obs. Bloqueadas",
-            "Valor Carteira",
-            "Valor Bloqueado",
-            "Valor Liberado",
-            "Valor liberado PROG 2",
+            ("Pedidos Abertos", "Abertos"),
+            ("Pedidos Bloqueados", "Bloqueados"),
+            ("Clientes Bloq.", "Clientes bloq."),
+            ("Pedidos PROG 2", "PROG 2"),
+            ("Valor Carteira", "Carteira"),
+            ("Valor Bloqueado", "Valor bloq."),
+            ("Valor Liberado", "Valor lib."),
+            ("Valor liberado PROG 2", "PROG 2 lib."),
         ]
 
-        for indice, campo in enumerate(campos):
-            bloco = ttk.Frame(frame, padding=(4, 2))
-            bloco.grid(row=0, column=indice, sticky="nsew", padx=2)
+        for indice, (campo, titulo) in enumerate(campos):
+            bloco = ttk.Frame(frame, padding=(6, 4), style="KpiCard.TFrame")
+            bloco.grid(row=0, column=indice, sticky="nsew", padx=2, pady=2)
 
             ttk.Label(
                 bloco,
-                text=campo,
+                text=titulo,
                 style="KpiTitle.TLabel"
-            ).pack(anchor="center")
+            ).pack(anchor="w")
 
             label_valor = ttk.Label(
                 bloco,
                 text="-",
                 style="KpiValue.TLabel"
             )
-            label_valor.pack(anchor="center", pady=(1, 0))
+            label_valor.pack(anchor="w", pady=(1, 0))
 
             self.labels_resumo[campo] = label_valor
 
@@ -207,13 +297,14 @@ class MainWindow:
 
     def criar_abas(self):
         self.abas = ttk.Notebook(self.root)
-        self.abas.pack(fill="both", expand=True, padx=8, pady=(0, 5))
+        self.abas.pack(fill="both", expand=True, padx=10, pady=(0, 6))
 
         aba_pedidos = ttk.Frame(self.abas)
         aba_prog2 = ttk.Frame(self.abas)
         aba_faturados = ttk.Frame(self.abas)
         aba_atrasados = ttk.Frame(self.abas)
         aba_bloqueios = ttk.Frame(self.abas)
+        aba_gargalos = ttk.Frame(self.abas)
         aba_consolidacoes = ttk.Frame(self.abas)
 
         self.abas.add(aba_pedidos, text="Pedidos")
@@ -221,6 +312,7 @@ class MainWindow:
         self.abas.add(aba_faturados, text="Faturados")
         self.abas.add(aba_atrasados, text="Atrasados")
         self.abas.add(aba_bloqueios, text="Bloqueios")
+        self.abas.add(aba_gargalos, text="Gargalos")
         self.abas.add(aba_consolidacoes, text="Consolidações")
 
         self.pedidos_tab = PedidosTab(aba_pedidos, self, self.state)
@@ -228,6 +320,7 @@ class MainWindow:
         self.faturados_tab = FaturadosTab(aba_faturados, self, self.state)
         self.atrasados_tab = AtrasadosTab(aba_atrasados, self, self.state)
         self.bloqueios_tab = BloqueiosTab(aba_bloqueios, self, self.state)
+        self.gargalos_tab = GargalosTab(aba_gargalos, self, self.state)
         self.consolidacoes_tab = ConsolidacoesTab(aba_consolidacoes, self, self.state)
 
         self.aplicar_ordenacao_tabelas()
@@ -239,6 +332,7 @@ class MainWindow:
             getattr(self, "faturados_tab", None),
             getattr(self, "atrasados_tab", None),
             getattr(self, "bloqueios_tab", None),
+            getattr(self, "gargalos_tab", None),
             getattr(self, "consolidacoes_tab", None),
         ]
 
@@ -260,9 +354,10 @@ class MainWindow:
         self.status = ttk.Label(
             self.root,
             text=texto,
-            relief="sunken",
+            relief="flat",
             anchor="w",
-            padding=(6, 4)
+            padding=(10, 5),
+            style="Hint.TLabel"
         )
         self.status.pack(fill="x", side="bottom")
 
@@ -270,32 +365,13 @@ class MainWindow:
         self.status.config(text=texto)
 
     def invalidar_cache(self):
-        self._cache.clear()
+        self.cache_service.invalidar()
 
     def obter_df_aberto_cache(self):
-        if not self.state.tem_dados():
-            return pd.DataFrame()
-
-        if "df_aberto" not in self._cache:
-            df = self.state.df_aberto().copy()
-            pedidos_faturados = set(str(pedido) for pedido in getattr(self.state, "pedidos_faturados", set()))
-
-            if pedidos_faturados and not df.empty:
-                coluna_pedido = "Pedido Texto" if "Pedido Texto" in df.columns else "Pedido"
-                df = df[~df[coluna_pedido].astype(str).isin(pedidos_faturados)].copy()
-
-            self._cache["df_aberto"] = df
-
-        return self._cache["df_aberto"]
+        return self.cache_service.obter_df_aberto()
 
     def obter_df_com_bloqueios_cache(self):
-        if not self.state.tem_dados():
-            return pd.DataFrame()
-
-        if "df_com_bloqueios" not in self._cache:
-            self._cache["df_com_bloqueios"] = self.state.df_com_bloqueios(self.obter_df_aberto_cache())
-
-        return self._cache["df_com_bloqueios"]
+        return self.cache_service.obter_df_com_bloqueios()
 
     def garantir_preset_padrao_clientes(self):
         presets_clientes = self.config.setdefault("presets", {}).setdefault("clientes", {})
@@ -305,21 +381,7 @@ class MainWindow:
             self.config_manager.salvar(self.config)
 
     def gerar_estado_para_salvar(self):
-        return {
-            "linhas_bloqueadas": sorted(int(item) for item in self.state.linhas_bloqueadas),
-            "codigos_itens_bloqueados": sorted(str(item) for item in self.state.codigos_itens_bloqueados),
-            "pedidos_bloqueados": sorted(str(item) for item in self.state.pedidos_bloqueados),
-            "observacoes_bloqueadas": sorted(str(item) for item in self.state.observacoes_bloqueadas),
-            "clientes_bloqueados": sorted(str(item) for item in self.state.clientes_bloqueados),
-            "pedidos_prog2": [str(item) for item in self.state.pedidos_prog2],
-            "pedidos_faturados": sorted(str(item) for item in getattr(self.state, "pedidos_faturados", set())),
-            "datas_faturamento_pedido": {str(k): str(v) for k, v in getattr(self.state, "datas_faturamento_pedido", {}).items()},
-            "motivos_linha": {str(k): v for k, v in self.state.motivos_linha.items()},
-            "motivos_item": dict(self.state.motivos_item),
-            "motivos_pedido": dict(self.state.motivos_pedido),
-            "motivos_observacao": dict(self.state.motivos_observacao),
-            "motivos_cliente": dict(self.state.motivos_cliente),
-        }
+        return self.estado_service.gerar_estado_para_salvar(self.state)
 
     def salvar_estado_atual(self):
         self.config["ultimo_csv"] = self.ultimo_arquivo_importado or ""
@@ -338,79 +400,12 @@ class MainWindow:
         self.set_status("Estado salvo localmente.")
 
     def restaurar_estado_salvo(self):
-        if not self.state.tem_dados():
-            return
-
-        estado = self.config.get("estado", {})
         self.observacoes_internas = self.config.setdefault("observacoes_internas", {})
-
-        df = self.state.df_original
-
-        ids_existentes = set(int(valor) for valor in df["ID Linha"].unique())
-        pedidos_existentes = set(str(valor) for valor in df["Pedido Texto"].unique())
-        itens_existentes = set(str(valor) for valor in df["Item Texto"].unique())
-
-        self.state.linhas_bloqueadas = {
-            int(item)
-            for item in estado.get("linhas_bloqueadas", [])
-            if int(item) in ids_existentes
-        }
-
-        self.state.codigos_itens_bloqueados = {
-            str(item)
-            for item in estado.get("codigos_itens_bloqueados", [])
-            if str(item) in itens_existentes
-        }
-
-        self.state.pedidos_bloqueados = {
-            str(item)
-            for item in estado.get("pedidos_bloqueados", [])
-            if str(item) in pedidos_existentes
-        }
-
-        self.state.observacoes_bloqueadas = {
-            str(item)
-            for item in estado.get("observacoes_bloqueadas", [])
-        }
-
-        self.state.clientes_bloqueados = {
-            str(item)
-            for item in estado.get("clientes_bloqueados", [])
-        }
-
-        self.state.pedidos_faturados = {
-            str(item)
-            for item in estado.get("pedidos_faturados", [])
-        }
-
-        self.state.datas_faturamento_pedido = {
-            str(k): str(v)
-            for k, v in estado.get("datas_faturamento_pedido", {}).items()
-        }
-
-        self.state.pedidos_prog2 = [
-            str(item)
-            for item in estado.get("pedidos_prog2", [])
-            if str(item) in pedidos_existentes
-            and str(item) not in self.state.pedidos_faturados
-        ]
-
-        self.state.motivos_linha = {
-            int(k): v
-            for k, v in estado.get("motivos_linha", {}).items()
-            if str(k).isdigit() and int(k) in ids_existentes
-        }
-
-        self.state.motivos_item = dict(estado.get("motivos_item", {}))
-        self.state.motivos_pedido = dict(estado.get("motivos_pedido", {}))
-        self.state.motivos_observacao = dict(estado.get("motivos_observacao", {}))
-        self.state.motivos_cliente = dict(estado.get("motivos_cliente", {}))
-
-        self.observacoes_internas = {
-            str(pedido): texto
-            for pedido, texto in self.observacoes_internas.items()
-            if str(pedido) in pedidos_existentes
-        }
+        self.observacoes_internas = self.estado_service.restaurar_estado_salvo(
+            self.state,
+            self.config,
+            self.observacoes_internas,
+        )
 
     def observacao_interna_pedido(self, pedido):
         return self.observacoes_internas.get(str(pedido), "")
@@ -450,6 +445,69 @@ class MainWindow:
             self.set_status(f"Observação interna removida do pedido {pedido}.")
         else:
             self.set_status(f"O pedido {pedido} não possui observação interna.")
+
+    def obter_linha_por_id(self, id_linha):
+        try:
+            id_linha = int(id_linha)
+        except (TypeError, ValueError):
+            return None
+
+        if not self.state.tem_dados():
+            return None
+
+        linha = self.state.df_original[self.state.df_original["ID Linha"] == id_linha]
+        if linha.empty:
+            return None
+
+        return linha.iloc[0]
+
+    def definir_pendencia_prog2_item(self, id_linha, motivo):
+        linha = self.obter_linha_por_id(id_linha)
+        motivo = str(motivo).strip()
+
+        if linha is None:
+            self.set_status("Item inválido para aplicar pendência.")
+            return
+
+        if not motivo:
+            self.set_status("Motivo de pendência inválido.")
+            return
+
+        pedido = str(linha["Pedido Texto"])
+        if pedido not in self.state.pedidos_prog2:
+            self.set_status(f"Pedido {pedido} não está no PROG 2.")
+            return
+
+        if not self.state.definir_pendencia_item_prog2(id_linha, motivo):
+            self.set_status("Não foi possível aplicar a pendência no item.")
+            return
+
+        self.invalidar_cache()
+        self.refresh_all()
+        self.salvar_estado_atual()
+        self.set_status(f"Pendência '{motivo}' aplicada ao item {linha['Item']} do pedido {pedido}.")
+
+    def limpar_pendencia_prog2_item(self, id_linha):
+        linha = self.obter_linha_por_id(id_linha)
+        if linha is None:
+            self.set_status("Item inválido para limpar pendência.")
+            return
+
+        pedido = str(linha["Pedido Texto"])
+        if self.state.limpar_pendencia_item_prog2(id_linha):
+            self.invalidar_cache()
+            self.refresh_all()
+            self.salvar_estado_atual()
+            self.set_status(f"Pendência removida do item {linha['Item']} do pedido {pedido}.")
+            return
+
+        self.set_status(f"O item {linha['Item']} do pedido {pedido} não possui pendência.")
+
+    def definir_pendencia_prog2(self, pedido, motivo):
+        self.set_status("Pendências agora são aplicadas por item. Clique com o botão direito em um item do PROG 2.")
+
+    def limpar_pendencia_prog2(self, pedido):
+        self.set_status("Pendências agora são removidas por item. Clique com o botão direito em um item do PROG 2.")
 
     def registrar_erro(self, contexto, erro):
         data = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
@@ -522,8 +580,7 @@ class MainWindow:
             self.set_status("Importando e validando arquivo...")
             self.root.update_idletasks()
 
-            df = carregar_carteira(caminho)
-            self.state.carregar_dataframe(df)
+            df = self.importacao_service.carregar_csv(caminho)
             self.ultimo_arquivo_importado = caminho
 
             self.invalidar_cache()
@@ -556,6 +613,7 @@ class MainWindow:
         self.faturados_tab.refresh()
         self.atrasados_tab.refresh()
         self.bloqueios_tab.refresh()
+        self.gargalos_tab.refresh()
         self.consolidacoes_tab.refresh()
         self.aplicar_ordenacao_tabelas()
 
@@ -564,6 +622,7 @@ class MainWindow:
         self.prog2_tab.refresh()
         self.faturados_tab.refresh()
         self.atrasados_tab.refresh()
+        self.gargalos_tab.refresh()
         self.atualizar_resumo()
         self.aplicar_ordenacao_tabelas()
 
@@ -577,7 +636,7 @@ class MainWindow:
         valor_total = df_bloqueios["Valor em Carteira"].sum() if not df_bloqueios.empty else 0
         valor_bloqueado = df_bloqueios["_Valor Bloqueado"].sum() if not df_bloqueios.empty else 0
         valor_liberado = df_bloqueios["_Valor Liberado"].sum() if not df_bloqueios.empty else 0
-        totais_prog2 = self.state.calcular_totais_prog2()
+        totais_prog2 = self.state.calcular_totais_prog2(df_bloqueios)
 
         pedidos_bloqueados_total = set(self.state.pedidos_bloqueados)
         pedidos_bloqueados_total.update(self.state.pedidos_bloqueados_por_observacao_set())
@@ -588,7 +647,6 @@ class MainWindow:
             "Pedidos Bloqueados": len(pedidos_bloqueados_total),
             "Clientes Bloq.": len(self.state.clientes_bloqueados),
             "Pedidos PROG 2": totais_prog2["pedidos"],
-            "Obs. Bloqueadas": len(self.state.observacoes_bloqueadas),
             "Valor Carteira": formatar_moeda(valor_total),
             "Valor Bloqueado": formatar_moeda(valor_bloqueado),
             "Valor Liberado": formatar_moeda(valor_liberado),
@@ -598,7 +656,6 @@ class MainWindow:
         estilos = {
             "Pedidos Bloqueados": "KpiDanger.TLabel" if len(pedidos_bloqueados_total) > 0 else "KpiValue.TLabel",
             "Clientes Bloq.": "KpiDanger.TLabel" if len(self.state.clientes_bloqueados) > 0 else "KpiValue.TLabel",
-            "Obs. Bloqueadas": "KpiWarning.TLabel" if len(self.state.observacoes_bloqueadas) > 0 else "KpiValue.TLabel",
             "Valor Bloqueado": "KpiDanger.TLabel" if valor_bloqueado > 0 else "KpiValue.TLabel",
             "Valor Liberado": "KpiPositive.TLabel" if valor_liberado > 0 else "KpiValue.TLabel",
             "Valor liberado PROG 2": "KpiPositive.TLabel" if totais_prog2["valor_liberado"] > 0 else "KpiValue.TLabel",
@@ -1348,19 +1405,7 @@ class MainWindow:
         if not confirmar:
             return
 
-        data_faturamento = datetime.now().strftime("%d/%m/%Y %H:%M")
-
-        if not hasattr(self.state, "pedidos_faturados"):
-            self.state.pedidos_faturados = set()
-
-        if not hasattr(self.state, "datas_faturamento_pedido"):
-            self.state.datas_faturamento_pedido = {}
-
-        for pedido in pedidos_prog2:
-            self.state.pedidos_faturados.add(str(pedido))
-            self.state.datas_faturamento_pedido[str(pedido)] = data_faturamento
-
-        self.state.limpar_prog2()
+        self.faturamento_service.fechar_prog2()
         self.invalidar_cache()
         self.refresh_all()
         self.salvar_estado_atual()
@@ -1369,12 +1414,6 @@ class MainWindow:
 
     def remover_pedido_faturado(self, pedido):
         pedido = str(pedido)
-
-        if not hasattr(self.state, "pedidos_faturados"):
-            self.state.pedidos_faturados = set()
-
-        if not hasattr(self.state, "datas_faturamento_pedido"):
-            self.state.datas_faturamento_pedido = {}
 
         if pedido not in self.state.pedidos_faturados:
             self.set_status("Pedido não está marcado como faturado.")
@@ -1389,9 +1428,7 @@ class MainWindow:
         if not confirmar:
             return
 
-        self.state.pedidos_faturados.discard(pedido)
-        self.state.datas_faturamento_pedido.pop(pedido, None)
-
+        self.faturamento_service.remover_pedido_faturado(pedido)
         self.invalidar_cache()
         self.refresh_all()
         self.salvar_estado_atual()
@@ -1490,86 +1527,16 @@ class MainWindow:
         )
 
     def gerar_df_prog2_itens_liberados(self):
-        if not self.state.tem_dados() or not self.state.pedidos_prog2:
-            return pd.DataFrame()
-
-        df = self.obter_df_com_bloqueios_cache()
-
-        pedidos_prog2 = set(str(pedido) for pedido in self.state.pedidos_prog2)
-        df = df[df["Pedido Texto"].isin(pedidos_prog2)]
-
-        if df.empty:
-            return pd.DataFrame()
-
-        df = df[~df["_Bloqueado"]].copy()
-
-        if df.empty:
-            return pd.DataFrame()
-
-        resultado = df.groupby(
-            ["Item", "Descrição Item"],
-            as_index=False
-        ).agg({
-            "Pedido": "nunique",
-            "Cliente": "nunique",
-            "Saldo a Faturar": "sum",
-            "Valor em Carteira": "sum",
-        })
-
-        resultado.rename(
-            columns={
-                "Pedido": "Qtd. Pedidos",
-                "Cliente": "Qtd. Clientes",
-                "Saldo a Faturar": "Qtde Liberada",
-                "Valor em Carteira": "Valor Liberado",
-            },
-            inplace=True
+        return self.exportacao_service.gerar_df_prog2_itens_liberados(
+            self.state,
+            self.obter_df_com_bloqueios_cache(),
         )
 
-        resultado.sort_values("Qtde Liberada", ascending=False, inplace=True)
-
-        return resultado
-
     def gerar_df_prog2_pedidos_liberados(self):
-        if not self.state.tem_dados() or not self.state.pedidos_prog2:
-            return pd.DataFrame()
-
-        df = self.obter_df_com_bloqueios_cache()
-
-        pedidos_prog2 = set(str(pedido) for pedido in self.state.pedidos_prog2)
-        df = df[df["Pedido Texto"].isin(pedidos_prog2)]
-
-        if df.empty:
-            return pd.DataFrame()
-
-        df = df[~df["_Bloqueado"]].copy()
-
-        if df.empty:
-            return pd.DataFrame()
-
-        registros = []
-
-        for pedido, grupo in df.groupby("Pedido", sort=False):
-            cliente_original = str(grupo["Cliente"].iloc[0])
-            cliente_abrev = self.state.abreviar_cliente(cliente_original)
-
-            registros.append({
-                "Pedido": pedido,
-                "Cliente": cliente_abrev,
-                "Cliente Original": cliente_original,
-                "Data Entrega": str(grupo["Data Entrega"].iloc[0]),
-                "Grupo": str(grupo["Grupo Faturamento Abrev"].iloc[0]),
-                "Qtd. Itens Liberados": grupo["Item"].nunique(),
-                "Qtde Liberada": grupo["Saldo a Faturar"].sum(),
-                "Valor Total Liberado": grupo["Valor em Carteira"].sum(),
-            })
-
-        resultado = pd.DataFrame(registros)
-
-        if not resultado.empty:
-            resultado.sort_values("Qtde Liberada", ascending=False, inplace=True)
-
-        return resultado
+        return self.exportacao_service.gerar_df_prog2_pedidos_liberados(
+            self.state,
+            self.obter_df_com_bloqueios_cache(),
+        )
 
     def abrir_arquivo_pdf(self, caminho):
         self.abrir_arquivo(caminho)

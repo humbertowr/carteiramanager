@@ -6,6 +6,7 @@ import pandas as pd
 from core.formatters import formatar_moeda, formatar_numero
 from ui.styles import configurar_tags_tabela
 from ui.sortable_tree import aplicar_ordenacao_treeview
+from ui.ux_helpers import aplicar_menu_generico_tabela
 
 
 class FaturadosTab:
@@ -21,7 +22,7 @@ class FaturadosTab:
         self.criar_interface()
 
     def criar_interface(self):
-        container = ttk.Frame(self.parent, padding=(8, 6))
+        container = ttk.Frame(self.parent, padding=(10, 8))
         container.pack(fill="both", expand=True)
 
         self.criar_resumo(container)
@@ -62,9 +63,9 @@ class FaturadosTab:
 
         ttk.Label(frame, text="Buscar", style="Hint.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 6))
 
-        entrada = ttk.Entry(frame, textvariable=self.busca_var, width=42)
-        entrada.grid(row=0, column=1, sticky="w", padx=(0, 12))
-        entrada.bind("<KeyRelease>", lambda event: self.refresh())
+        self.entrada_busca = ttk.Entry(frame, textvariable=self.busca_var, width=42)
+        self.entrada_busca.grid(row=0, column=1, sticky="w", padx=(0, 12))
+        self.entrada_busca.bind("<KeyRelease>", lambda event: self.refresh())
 
         ttk.Button(
             frame,
@@ -95,12 +96,12 @@ class FaturadosTab:
 
         ttk.Label(
             barra,
-            text="Pedidos fechados no PROG 2 ficam salvos localmente e não aparecem mais na carteira de pedidos.",
+            text="Pedidos fechados no PROG 2 ficam salvos localmente e saem da carteira ativa.",
             style="Subtitle.TLabel",
         ).pack(side="left")
 
-        ttk.Button(barra, text="Expandir todos", command=self.expandir_todos).pack(side="right", padx=(4, 0))
-        ttk.Button(barra, text="Recolher todos", command=self.recolher_todos).pack(side="right", padx=4)
+        ttk.Button(barra, text="Expandir", command=self.expandir_todos, style="Compact.TButton").pack(side="right", padx=(4, 0))
+        ttk.Button(barra, text="Recolher", command=self.recolher_todos, style="Compact.TButton").pack(side="right", padx=4)
 
         colunas = (
             "Data Faturamento",
@@ -161,6 +162,7 @@ class FaturadosTab:
 
         frame.rowconfigure(1, weight=1)
         frame.columnconfigure(0, weight=1)
+        aplicar_menu_generico_tabela(self, "Faturados")
 
     def aplicar_ordenacao(self):
         aplicar_ordenacao_treeview(self.tabela)
@@ -246,6 +248,11 @@ class FaturadosTab:
             })
 
         return pd.DataFrame(registros)
+
+    def focar_busca(self):
+        if hasattr(self, "entrada_busca"):
+            self.entrada_busca.focus_set()
+            self.entrada_busca.selection_range(0, "end")
 
     def refresh(self):
         self.tabela.delete(*self.tabela.get_children())

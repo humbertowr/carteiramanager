@@ -1,4 +1,6 @@
 import json
+import shutil
+from datetime import datetime
 from pathlib import Path
 
 
@@ -8,6 +10,9 @@ class ConfigManager:
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
         self.config_path = self.base_dir / "config.json"
+        self.backup_path = self.base_dir / "config.backup.json"
+        self.backup_dir = self.base_dir / "backups"
+        self.backup_dir.mkdir(parents=True, exist_ok=True)
 
     def config_padrao(self):
         return {
@@ -19,6 +24,8 @@ class ConfigManager:
                 "observacoes_bloqueadas": [],
                 "clientes_bloqueados": [],
                 "pedidos_prog2": [],
+                "pedidos_faturados": [],
+                "datas_faturamento_pedido": {},
                 "motivos_linha": {},
                 "motivos_item": {},
                 "motivos_pedido": {},
@@ -52,6 +59,7 @@ class ConfigManager:
             return self.normalizar_config(config)
 
         except Exception:
+            self.criar_backup_corrompido()
             config = self.config_padrao()
             self.salvar(config)
             return config
@@ -93,13 +101,56 @@ class ConfigManager:
 
         return config
 
+    def criar_backup_config_atual(self):
+        if not self.config_path.exists():
+            return
+
+        try:
+            shutil.copy2(self.config_path, self.backup_path)
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_historico = self.backup_dir / f"config_{timestamp}.json"
+            shutil.copy2(self.config_path, backup_historico)
+            self.remover_backups_antigos(limite=20)
+        except Exception:
+            pass
+
+    def criar_backup_corrompido(self):
+        if not self.config_path.exists():
+            return
+
+        try:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            destino = self.backup_dir / f"config_corrompido_{timestamp}.json"
+            shutil.copy2(self.config_path, destino)
+        except Exception:
+            pass
+
+    def remover_backups_antigos(self, limite=20):
+        backups = sorted(
+            self.backup_dir.glob("config_*.json"),
+            key=lambda caminho: caminho.stat().st_mtime,
+            reverse=True,
+        )
+
+        for caminho in backups[limite:]:
+            try:
+                caminho.unlink()
+            except Exception:
+                pass
+
     def salvar(self, config):
         config = self.normalizar_config(config)
+        self.criar_backup_config_atual()
 
-        with open(self.config_path, "w", encoding="utf-8") as arquivo:
+        arquivo_temporario = self.config_path.with_suffix(".tmp")
+
+        with open(arquivo_temporario, "w", encoding="utf-8") as arquivo:
             json.dump(
                 config,
                 arquivo,
                 ensure_ascii=False,
-                indent=4
+                indent=4,
             )
+
+        arquivo_temporario.replace(self.config_path)
