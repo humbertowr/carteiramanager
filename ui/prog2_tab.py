@@ -51,14 +51,19 @@ class Prog2Tab:
     def salvar_meta_config(self):
         try:
             config = getattr(self.controller, "config", None)
-            config_manager = getattr(self.controller, "config_manager", None)
 
-            if isinstance(config, dict) and config_manager:
+            if isinstance(config, dict):
                 settings = config.setdefault("settings", {})
                 settings["meta_faturamento_dia"] = self.meta_faturamento_var.get().strip()
                 settings["meta_faturamento_mes"] = self.meta_faturamento_mes_var.get().strip()
                 settings.pop("meta_faturamento_semana", None)
-                config_manager.salvar(config)
+
+                if hasattr(self.controller, "salvar_estado_atual"):
+                    self.controller.salvar_estado_atual("Meta de faturamento", "Meta diária/mensal atualizada.")
+                else:
+                    config_manager = getattr(self.controller, "config_manager", None)
+                    if config_manager:
+                        config_manager.salvar(config)
         except Exception:
             pass
 

@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 import tempfile
 import traceback
@@ -64,11 +65,12 @@ class MainWindow:
 
         self.garantir_preset_padrao_clientes()
 
-        self.log_dir = Path.home() / ".carteira_ops" / "logs"
+        self.log_dir = self.config_manager.log_dir
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.log_path = self.log_dir / "app.log"
 
         self.criar_interface()
+        self.root.after(300, self.inicializar_dados_ao_abrir)
 
     def criar_interface(self):
         self.criar_topo()
@@ -198,6 +200,7 @@ class MainWindow:
 
         menu.add_command(label="Importar CSV", command=self.importar_csv)
         menu.add_command(label="Recarregar último CSV", command=self.recarregar_ultimo_csv)
+        menu.add_command(label="Atualizar dados compartilhados", command=self.atualizar_dados_compartilhados)
         menu.add_separator()
         menu.add_command(label="Salvar estado agora", command=self.salvar_estado_manual)
         menu.add_separator()
@@ -383,21 +386,50 @@ class MainWindow:
     def gerar_estado_para_salvar(self):
         return self.estado_service.gerar_estado_para_salvar(self.state)
 
-    def salvar_estado_atual(self):
-        self.config["ultimo_csv"] = self.ultimo_arquivo_importado or ""
-        self.config["estado"] = self.gerar_estado_para_salvar()
-        self.config["observacoes_internas"] = self.observacoes_internas
+    def salvar_estado_atual(self, acao_historico=None, detalhe_historico="", pedido="", item=""):
+        # Em modo compartilhado, recarrega a versão mais recente antes de gravar para
+        # preservar presets/settings alterados por outro usuário. O estado operacional
+        # atual da tela continua sendo a fonte da alteração que será salva.
+        if getattr(self.config_manager, "modo_compartilhado", False):
+            settings_atuais = dict(self.config.get("settings", {})) if isinstance(self.config, dict) else {}
+            presets_atuais = dict(self.config.get("presets", {})) if isinstance(self.config, dict) else {}
+
+            config_atual = self.config_manager.carregar()
+            if settings_atuais:
+                config_atual.setdefault("settings", {}).update(settings_atuais)
+            if presets_atuais:
+                config_atual.setdefault("presets", {}).update(presets_atuais)
+
+            config_atual["estado"] = self.gerar_estado_para_salvar()
+            config_atual["ultimo_csv"] = self.ultimo_arquivo_importado or config_atual.get("ultimo_csv", "")
+            config_atual["observacoes_internas"] = self.observacoes_internas
+            self.config = config_atual
+        else:
+            self.config["ultimo_csv"] = self.ultimo_arquivo_importado or ""
+            self.config["estado"] = self.gerar_estado_para_salvar()
+            self.config["observacoes_internas"] = self.observacoes_internas
+
+        if acao_historico:
+            self.config_manager.registrar_historico(
+                self.config,
+                acao_historico,
+                detalhe=detalhe_historico,
+                pedido=pedido,
+                item=item,
+            )
+
         self.config_manager.salvar(self.config)
 
     def salvar_estado_manual(self):
-        self.salvar_estado_atual()
+        self.salvar_estado_atual("Salvamento manual", "Usuário salvou o estado manualmente.")
 
+        modo = "compartilhado" if getattr(self.config_manager, "modo_compartilhado", False) else "local"
         messagebox.showinfo(
             "Estado salvo",
-            f"Estado salvo localmente em:\n{self.config_manager.config_path}"
+            f"Estado salvo em modo {modo}:\n{self.config_manager.config_path}"
         )
 
-        self.set_status("Estado salvo localmente.")
+        self.set_status(f"Estado salvo em modo {modo}.")
 
     def restaurar_estado_salvo(self):
         self.observacoes_internas = self.config.setdefault("observacoes_internas", {})
@@ -406,6 +438,56 @@ class MainWindow:
             self.config,
             self.observacoes_internas,
         )
+
+    def inicializar_dados_ao_abrir(self):
+        if not getattr(self.config_manager, "modo_compartilhado", False):
+            self.set_status("Modo local ativo. Dados salvos neste computador.")
+            return
+
+        self.set_status(f"Modo compartilhado ativo: {self.config_manager.config_path}")
+
+        restaurar = self.config.get("settings", {}).get("restaurar_ultimo_csv_ao_abrir", True)
+        ultimo_csv = self.config.get("ultimo_csv", "")
+
+        if restaurar and ultimo_csv and os.path.exists(ultimo_csv):
+            try:
+                self.carregar_arquivo_csv(ultimo_csv, registrar_historico=False)
+            except Exception:
+                self.set_status("Modo compartilhado ativo. Importe o CSV compartilhado para carregar a carteira.")
+
+    def salvar_csv_compartilhado_se_necessario(self, caminho):
+        if not getattr(self.config_manager, "modo_compartilhado", False):
+            return caminho
+
+        try:
+            origem = Path(caminho)
+            if not origem.exists():
+                return caminho
+
+            destino = self.config_manager.base_dir / "ultimo_csv_importado.csv"
+            if origem.resolve() != destino.resolve():
+                shutil.copy2(origem, destino)
+            return str(destino)
+        except Exception as erro:
+            self.registrar_erro("Erro ao copiar CSV para pasta compartilhada", erro)
+            return caminho
+
+    def atualizar_dados_compartilhados(self):
+        self.config = self.config_manager.carregar()
+        self.ultimo_arquivo_importado = self.config.get("ultimo_csv", self.ultimo_arquivo_importado)
+
+        if self.state.tem_dados():
+            self.restaurar_estado_salvo()
+            self.invalidar_cache()
+            self.refresh_all()
+            self.set_status(f"Dados atualizados de: {self.config_manager.config_path}")
+            return
+
+        if self.ultimo_arquivo_importado and os.path.exists(self.ultimo_arquivo_importado):
+            self.carregar_arquivo_csv(self.ultimo_arquivo_importado, registrar_historico=False)
+            return
+
+        self.set_status("Dados compartilhados carregados. Importe o CSV para visualizar a carteira.")
 
     def observacao_interna_pedido(self, pedido):
         return self.observacoes_internas.get(str(pedido), "")
@@ -575,25 +657,36 @@ class MainWindow:
 
         self.carregar_arquivo_csv(self.ultimo_arquivo_importado)
 
-    def carregar_arquivo_csv(self, caminho):
+    def carregar_arquivo_csv(self, caminho, registrar_historico=True):
         try:
             self.set_status("Importando e validando arquivo...")
             self.root.update_idletasks()
 
             df = self.importacao_service.carregar_csv(caminho)
-            self.ultimo_arquivo_importado = caminho
+            caminho_estado = self.salvar_csv_compartilhado_se_necessario(caminho)
+            self.ultimo_arquivo_importado = caminho_estado
 
+            # Recarrega o JSON compartilhado mais recente antes de restaurar estado.
+            self.config = self.config_manager.carregar()
             self.invalidar_cache()
             self.restaurar_estado_salvo()
             self.invalidar_cache()
             self.refresh_all()
-            self.salvar_estado_atual()
 
+            if registrar_historico:
+                self.salvar_estado_atual(
+                    "Importação CSV",
+                    f"Arquivo importado: {caminho_estado}",
+                )
+            else:
+                self.salvar_estado_atual()
+
+            modo = "compartilhado" if getattr(self.config_manager, "modo_compartilhado", False) else "local"
             self.set_status(
-                f"Arquivo importado com sucesso: {caminho} | "
+                f"Arquivo importado com sucesso: {caminho_estado} | "
                 f"Linhas: {len(df)} | "
                 f"Pedidos: {df['Pedido'].nunique()} | "
-                f"Estado local restaurado."
+                f"Estado {modo} restaurado."
             )
 
         except Exception as erro:

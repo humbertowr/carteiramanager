@@ -1,38 +1,61 @@
-# Ambiente virtual
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environment
 .venv/
 venv/
 env/
-
-# Python cache
-__pycache__/
-*.py[cod]
-*$py.class
 
 # PyInstaller
 build/
 dist/
 *.spec
 
-# Arquivos temporários
+# Logs
+logs/
 *.log
-*.tmp
-*.temp
-*.bak
 
-# Excel/PDF/CSV gerados pelo programa
+# Backups
+backups/
+*.bak
+*.backup
+*_backup*
+*.tmp
+*.lock
+*.json
+
+# Dados locais/compartilhados do app
+data/
+estado_compartilhado.json
+estado_compartilhado.lock
+ultimo_csv_importado.csv
+
+# Configuração local por máquina/usuário
+config_local.json
+
+# Arquivos exportados
+exports/
 *.xlsx
 *.xls
 *.pdf
 *.csv
 
-# Configurações locais
-.env
-.env.local
-
-# VS Code
-.vscode/
-
-# Sistema
+# Sistema operacional
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# IDE/editor
+.vscode/
+.idea/
+
+# Arquivos compactados
+*.zip
+*.rar
+*.7z
