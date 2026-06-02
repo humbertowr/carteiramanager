@@ -1,3 +1,4 @@
+from datetime import datetime
 import tkinter as tk
 from tkinter import ttk
 
@@ -18,6 +19,7 @@ class FaturadosTab:
         self.busca_var = tk.StringVar()
         self.mapa_pedidos = {}
         self._df_faturados = pd.DataFrame()
+        self._df_itens_dia = pd.DataFrame()
 
         self.criar_interface()
 
@@ -32,25 +34,28 @@ class FaturadosTab:
     def criar_resumo(self, parent):
         frame = ttk.LabelFrame(
             parent,
-            text="Resumo de faturados",
+            text="Faturados do dia",
             padding=(8, 6),
             style="Section.TLabelframe",
         )
         frame.pack(fill="x", pady=(0, 6))
 
-        self.label_pedidos = ttk.Label(frame, text="Pedidos faturados: 0", style="SummaryValue.TLabel")
-        self.label_pedidos.grid(row=0, column=0, sticky="w", padx=(0, 24))
+        self.label_data = ttk.Label(frame, text=f"Data: {self.data_hoje()}", style="SummaryValue.TLabel")
+        self.label_data.grid(row=0, column=0, sticky="w", padx=(0, 24))
+
+        self.label_pedidos = ttk.Label(frame, text="Pedidos: 0", style="SummaryValue.TLabel")
+        self.label_pedidos.grid(row=0, column=1, sticky="w", padx=(0, 24))
 
         self.label_itens = ttk.Label(frame, text="Itens: 0", style="SummaryValue.TLabel")
-        self.label_itens.grid(row=0, column=1, sticky="w", padx=(0, 24))
+        self.label_itens.grid(row=0, column=2, sticky="w", padx=(0, 24))
 
-        self.label_valor_total = ttk.Label(frame, text="Valor total: R$ 0,00", style="SummaryValue.TLabel")
-        self.label_valor_total.grid(row=0, column=2, sticky="w", padx=(0, 24))
+        self.label_qtde = ttk.Label(frame, text="Qtde: 0,00", style="SummaryValue.TLabel")
+        self.label_qtde.grid(row=0, column=3, sticky="w", padx=(0, 24))
 
-        self.label_valor_liberado = ttk.Label(frame, text="Valor liberado: R$ 0,00", style="SummaryValue.TLabel")
-        self.label_valor_liberado.grid(row=0, column=3, sticky="w", padx=(0, 24))
+        self.label_valor_total = ttk.Label(frame, text="Total faturado: R$ 0,00", style="SummaryValue.TLabel")
+        self.label_valor_total.grid(row=0, column=4, sticky="w", padx=(0, 24))
 
-        frame.columnconfigure(4, weight=1)
+        frame.columnconfigure(5, weight=1)
 
     def criar_acoes(self, parent):
         frame = ttk.LabelFrame(
@@ -69,23 +74,30 @@ class FaturadosTab:
 
         ttk.Button(
             frame,
+            text="Exportar faturados do dia",
+            command=self.controller.exportar_faturados_dia,
+            style="Primary.TButton",
+        ).grid(row=0, column=2, sticky="w", padx=3)
+
+        ttk.Button(
+            frame,
             text="Remover do faturamento",
             command=self.remover_selecionado,
             style="Danger.TButton",
-        ).grid(row=0, column=2, sticky="w", padx=3)
+        ).grid(row=0, column=3, sticky="w", padx=3)
 
         ttk.Label(
             frame,
-            text="Remover faz o pedido voltar para a carteira, caso ele exista no CSV atual.",
+            text="Mostra somente pedidos fechados hoje via PROG 2.",
             style="Hint.TLabel",
-        ).grid(row=0, column=3, sticky="w", padx=(12, 0))
+        ).grid(row=0, column=4, sticky="w", padx=(12, 0))
 
-        frame.columnconfigure(4, weight=1)
+        frame.columnconfigure(5, weight=1)
 
     def criar_tabela(self, parent):
         frame = ttk.LabelFrame(
             parent,
-            text="Pedidos faturados",
+            text="Pedidos e itens faturados hoje",
             padding=(8, 6),
             style="Section.TLabelframe",
         )
@@ -96,7 +108,7 @@ class FaturadosTab:
 
         ttk.Label(
             barra,
-            text="Pedidos fechados no PROG 2 ficam salvos localmente e saem da carteira ativa.",
+            text="Cada fechamento de faturamento registra os itens liberados do PROG 2 no dia atual.",
             style="Subtitle.TLabel",
         ).pack(side="left")
 
@@ -104,44 +116,31 @@ class FaturadosTab:
         ttk.Button(barra, text="Recolher", command=self.recolher_todos, style="Compact.TButton").pack(side="right", padx=4)
 
         colunas = (
-            "Data Faturamento",
             "Cliente",
-            "Data Entrega",
-            "Qtde Saldo",
-            "Valor Pedido",
-            "Valor Bloqueado",
-            "Valor Liberado",
-            "Status",
+            "Qtde",
+            "Valor Faturamento",
+            "Data/Hora",
+            "Status/OBS",
         )
 
         self.tabela = ttk.Treeview(frame, columns=colunas, show="tree headings")
         self.tabela.heading("#0", text="Pedido / Item")
-        self.tabela.column("#0", width=320, minwidth=220, anchor="w", stretch=True)
+        self.tabela.column("#0", width=360, minwidth=240, anchor="w", stretch=True)
 
         larguras = {
-            "Data Faturamento": 140,
             "Cliente": 340,
-            "Data Entrega": 105,
-            "Qtde Saldo": 90,
-            "Valor Pedido": 130,
-            "Valor Bloqueado": 130,
-            "Valor Liberado": 130,
-            "Status": 170,
-        }
-
-        textos = {
-            "Qtde Saldo": "Qtde",
-            "Valor Pedido": "Vlr Pedido",
-            "Valor Bloqueado": "Vlr Bloq.",
-            "Valor Liberado": "Vlr Lib.",
+            "Qtde": 90,
+            "Valor Faturamento": 150,
+            "Data/Hora": 140,
+            "Status/OBS": 240,
         }
 
         for coluna in colunas:
-            self.tabela.heading(coluna, text=textos.get(coluna, coluna))
+            self.tabela.heading(coluna, text=coluna)
             self.tabela.column(
                 coluna,
                 width=larguras.get(coluna, 120),
-                minwidth=60,
+                minwidth=70,
                 anchor="w",
                 stretch=False,
             )
@@ -162,16 +161,137 @@ class FaturadosTab:
 
         frame.rowconfigure(1, weight=1)
         frame.columnconfigure(0, weight=1)
-        aplicar_menu_generico_tabela(self, "Faturados")
+        aplicar_menu_generico_tabela(self, "Faturados do dia")
 
     def aplicar_ordenacao(self):
         aplicar_ordenacao_treeview(self.tabela)
 
-    def pedidos_faturados(self):
-        return sorted(str(pedido) for pedido in getattr(self.state, "pedidos_faturados", set()))
+    def data_hoje(self):
+        return datetime.now().strftime("%d/%m/%Y")
 
-    def datas_faturamento(self):
-        return getattr(self.state, "datas_faturamento_pedido", {})
+    def normalizar_data_faturamento(self, valor):
+        texto = str(valor or "").strip()
+        if not texto:
+            return ""
+        return texto.split()[0]
+
+    def _valor_total_pedido_original(self, pedido):
+        if not self.state.tem_dados():
+            return 0.0
+
+        df = self.state.df_original
+        coluna_pedido = "Pedido Texto" if "Pedido Texto" in df.columns else "Pedido"
+        if coluna_pedido not in df.columns or "Valor em Carteira" not in df.columns:
+            return 0.0
+
+        filtro = df[coluna_pedido].astype(str) == str(pedido)
+        if not filtro.any():
+            return 0.0
+
+        return float(pd.to_numeric(df.loc[filtro, "Valor em Carteira"], errors="coerce").fillna(0).sum())
+
+    def _aplicar_valor_saldo_pedido(self, df):
+        if df is None or df.empty:
+            return pd.DataFrame() if df is None else df
+
+        resultado = df.copy()
+
+        if "Valor Saldo Pedido" not in resultado.columns:
+            resultado["Valor Saldo Pedido"] = 0.0
+
+        resultado["Valor Saldo Pedido"] = pd.to_numeric(
+            resultado["Valor Saldo Pedido"],
+            errors="coerce"
+        ).fillna(0)
+
+        if "Pedido" not in resultado.columns or "Valor Total Faturamento" not in resultado.columns:
+            return resultado
+
+        for pedido, grupo in resultado.groupby("Pedido", sort=False):
+            pedido = str(pedido)
+            valor_atual = float(grupo["Valor Saldo Pedido"].max())
+            if valor_atual > 0:
+                continue
+
+            valor_total_pedido = self._valor_total_pedido_original(pedido)
+            if valor_total_pedido <= 0:
+                continue
+
+            valor_faturado = float(
+                pd.to_numeric(grupo["Valor Total Faturamento"], errors="coerce").fillna(0).sum()
+            )
+            saldo = max(valor_total_pedido - valor_faturado, 0)
+            resultado.loc[grupo.index, "Valor Saldo Pedido"] = saldo
+
+        return resultado
+
+    def pedidos_faturados(self):
+        hoje = self.data_hoje()
+        datas = getattr(self.state, "datas_faturamento_pedido", {})
+        pedidos = {
+            str(pedido)
+            for pedido in getattr(self.state, "pedidos_faturados", set())
+            if self.normalizar_data_faturamento(datas.get(str(pedido), "")) == hoje
+        }
+
+        for registro in getattr(self.state, "registros_faturamento", []):
+            data_ref = self.normalizar_data_faturamento(
+                registro.get("Data Referência", registro.get("Data Faturamento", ""))
+            )
+            if data_ref == hoje and registro.get("Pedido"):
+                pedidos.add(str(registro.get("Pedido")))
+
+        return sorted(pedidos)
+
+    def df_registros_faturamento_dia(self):
+        registros = [
+            dict(registro)
+            for registro in getattr(self.state, "registros_faturamento", [])
+            if isinstance(registro, dict)
+        ]
+
+        if not registros:
+            return pd.DataFrame()
+
+        df = pd.DataFrame(registros)
+        if df.empty:
+            return pd.DataFrame()
+
+        if "Data Referência" not in df.columns:
+            df["Data Referência"] = df.get("Data Faturamento", "").astype(str).str.split().str[0]
+
+        hoje = self.data_hoje()
+        df = df[df["Data Referência"].astype(str).apply(self.normalizar_data_faturamento) == hoje].copy()
+
+        if df.empty:
+            return pd.DataFrame()
+
+        colunas_padrao = {
+            "Data Referência": hoje,
+            "Data Faturamento": "",
+            "Pedido": "",
+            "Cliente": "",
+            "Item": "",
+            "Descrição Item": "",
+            "Qtde": 0,
+            "Valor Total Faturamento": 0,
+            "Valor Saldo Pedido": 0,
+            "Data Entrega": "",
+            "Grupo": "",
+            "OBS": "",
+            "ID Linha": "",
+        }
+
+        for coluna, padrao in colunas_padrao.items():
+            if coluna not in df.columns:
+                df[coluna] = padrao
+
+        df["Qtde"] = pd.to_numeric(df["Qtde"], errors="coerce").fillna(0)
+        df["Valor Total Faturamento"] = pd.to_numeric(df["Valor Total Faturamento"], errors="coerce").fillna(0)
+        df["Valor Saldo Pedido"] = pd.to_numeric(df["Valor Saldo Pedido"], errors="coerce").fillna(0)
+        df = self._aplicar_valor_saldo_pedido(df)
+
+        return df[list(colunas_padrao.keys())].copy()
 
     def df_base_faturados(self):
         if not self.state.tem_dados():
@@ -194,60 +314,89 @@ class FaturadosTab:
 
         if hasattr(self.state, "df_com_bloqueios"):
             df = self.state.df_com_bloqueios(df)
-        else:
-            df["_Bloqueado"] = False
-            df["_Tipo Bloqueio"] = ""
-            df["_Valor Bloqueado"] = 0
-            df["_Valor Liberado"] = df["Valor em Carteira"]
+            if "_Bloqueado" in df.columns:
+                df = df[~df["_Bloqueado"]].copy()
 
         return df
 
-    def get_current_df(self):
-        pedidos = self.pedidos_faturados()
-        datas = self.datas_faturamento()
+    def df_itens_faturados_dia(self):
+        df_registros = self.df_registros_faturamento_dia()
+        if not df_registros.empty:
+            return df_registros
+
         df = self.df_base_faturados()
+        if df.empty:
+            return pd.DataFrame()
+
+        datas = getattr(self.state, "datas_faturamento_pedido", {})
         registros = []
 
-        for pedido in pedidos:
-            grupo = pd.DataFrame()
+        for _, linha in df.iterrows():
+            pedido = str(linha.get("Pedido Texto", linha.get("Pedido", "")))
+            id_linha = linha.get("ID Linha", "")
+            try:
+                id_pendencia = int(id_linha)
+            except (TypeError, ValueError):
+                id_pendencia = None
 
-            if not df.empty:
-                coluna_pedido = "Pedido Texto" if "Pedido Texto" in df.columns else "Pedido"
-                grupo = df[df[coluna_pedido].astype(str) == str(pedido)]
-
-            if grupo.empty:
-                registros.append({
-                    "Pedido": pedido,
-                    "Data Faturamento": datas.get(pedido, ""),
-                    "Cliente": "Não encontrado no CSV atual",
-                    "Data Entrega": "",
-                    "Qtd. Itens": 0,
-                    "Qtde Saldo": 0,
-                    "Valor Pedido": 0,
-                    "Valor Bloqueado": 0,
-                    "Valor Liberado": 0,
-                    "Status": "Faturado salvo",
-                })
-                continue
-
-            valor_total = grupo["Valor em Carteira"].sum()
-            valor_bloqueado = grupo["_Valor Bloqueado"].sum() if "_Valor Bloqueado" in grupo.columns else 0
-            valor_liberado = grupo["_Valor Liberado"].sum() if "_Valor Liberado" in grupo.columns else valor_total
+            obs = ""
+            if id_pendencia is not None:
+                obs = str(getattr(self.state, "pendencias_prog2", {}).get(id_pendencia, "") or "").strip()
 
             registros.append({
-                "Pedido": pedido,
+                "Data Referência": self.data_hoje(),
                 "Data Faturamento": datas.get(pedido, ""),
-                "Cliente": str(grupo["Cliente"].iloc[0]),
-                "Data Entrega": str(grupo["Data Entrega"].iloc[0]) if "Data Entrega" in grupo.columns else "",
-                "Qtd. Itens": len(grupo),
-                "Qtde Saldo": grupo["Saldo a Faturar"].sum() if "Saldo a Faturar" in grupo.columns else 0,
-                "Valor Pedido": valor_total,
-                "Valor Bloqueado": valor_bloqueado,
-                "Valor Liberado": valor_liberado,
-                "Status": "Faturado",
+                "Pedido": pedido,
+                "Cliente": str(linha.get("Cliente", "")),
+                "Item": str(linha.get("Item", "")),
+                "Descrição Item": str(linha.get("Descrição Item", "")),
+                "Qtde": float(linha.get("Saldo a Faturar", 0) or 0),
+                "Valor Total Faturamento": float(linha.get("Valor em Carteira", 0) or 0),
+                "Valor Saldo Pedido": 0.0,
+                "Data Entrega": str(linha.get("Data Entrega", "")),
+                "Grupo": str(linha.get("Grupo Faturamento Abrev", linha.get("Grupo Faturamento", ""))),
+                "OBS": obs,
+                "ID Linha": str(id_linha),
             })
 
-        return pd.DataFrame(registros)
+        return self._aplicar_valor_saldo_pedido(pd.DataFrame(registros))
+
+    def get_export_df(self, incluir_total=True):
+        df = self.df_itens_faturados_dia()
+        if df.empty:
+            return pd.DataFrame()
+
+        colunas = [
+            "Pedido",
+            "Cliente",
+            "Item",
+            "Descrição Item",
+            "Qtde",
+            "Valor Total Faturamento",
+            "Valor Saldo Pedido",
+            "Previsão de Embarque",
+            "OBS",
+        ]
+
+        for coluna in colunas:
+            if coluna not in df.columns:
+                df[coluna] = "" if coluna not in ("Qtde", "Valor Total Faturamento", "Valor Saldo Pedido") else 0
+
+        resultado = df[colunas].copy()
+        resultado.sort_values(["Pedido", "Item"], inplace=True, kind="stable")
+
+        if incluir_total:
+            total = {coluna: "" for coluna in colunas}
+            total["Pedido"] = "TOTAL DO DIA"
+            total["Qtde"] = resultado["Qtde"].sum()
+            total["Valor Total Faturamento"] = resultado["Valor Total Faturamento"].sum()
+            total["Valor Saldo Pedido"] = resultado.drop_duplicates("Pedido")["Valor Saldo Pedido"].sum()
+            resultado = pd.concat([resultado, pd.DataFrame([total])], ignore_index=True)
+
+        return resultado
+
+    def get_current_df(self):
+        return self.get_export_df(incluir_total=False)
 
     def focar_busca(self):
         if hasattr(self, "entrada_busca"):
@@ -258,39 +407,40 @@ class FaturadosTab:
         self.tabela.delete(*self.tabela.get_children())
         self.mapa_pedidos.clear()
 
-        pedidos = self.pedidos_faturados()
-        datas = self.datas_faturamento()
-        df = self.df_base_faturados()
+        df_itens = self.df_itens_faturados_dia()
         termo = self.busca_var.get().strip().lower()
-        df_resumo = self.get_current_df()
 
-        if termo and not df_resumo.empty:
-            df_resumo = df_resumo[
-                df_resumo[["Pedido", "Cliente", "Status"]]
+        if termo and not df_itens.empty:
+            colunas_busca = ["Pedido", "Cliente", "Item", "Descrição Item", "OBS"]
+            colunas_existentes = [coluna for coluna in colunas_busca if coluna in df_itens.columns]
+            df_itens = df_itens[
+                df_itens[colunas_existentes]
                 .astype(str)
                 .apply(lambda linha: linha.str.lower().str.contains(termo, na=False).any(), axis=1)
-            ]
-            pedidos = [str(pedido) for pedido in df_resumo["Pedido"].tolist()]
+            ].copy()
 
-        if df_resumo.empty:
+        if df_itens.empty:
             self._df_faturados = pd.DataFrame()
+            self._df_itens_dia = pd.DataFrame()
             self.atualizar_resumo(0, 0, 0, 0)
             return
 
-        self._df_faturados = df_resumo.copy()
+        self._df_itens_dia = df_itens.copy()
+        self._df_faturados = self.get_current_df()
 
         total_pedidos = 0
-        total_itens = 0
-        valor_total = 0
-        valor_liberado = 0
+        total_itens = len(df_itens)
+        total_qtde = float(df_itens["Qtde"].sum())
+        valor_total = float(df_itens["Valor Total Faturamento"].sum())
 
-        for indice, pedido in enumerate(pedidos, start=1):
-            resumo = df_resumo[df_resumo["Pedido"].astype(str) == str(pedido)]
-
-            if resumo.empty:
+        for indice, (pedido, grupo) in enumerate(df_itens.groupby("Pedido", sort=False), start=1):
+            if str(pedido).strip() == "":
                 continue
 
-            linha_resumo = resumo.iloc[0]
+            cliente = str(grupo["Cliente"].iloc[0]) if "Cliente" in grupo.columns else ""
+            data_faturamento = str(grupo["Data Faturamento"].iloc[0]) if "Data Faturamento" in grupo.columns else ""
+            qtde_pedido = float(grupo["Qtde"].sum())
+            valor_pedido = float(grupo["Valor Total Faturamento"].sum())
             iid_pedido = f"faturado_pedido_{indice}"
 
             self.tabela.insert(
@@ -299,14 +449,11 @@ class FaturadosTab:
                 iid=iid_pedido,
                 text=str(pedido),
                 values=(
-                    linha_resumo["Data Faturamento"],
-                    linha_resumo["Cliente"],
-                    linha_resumo["Data Entrega"],
-                    formatar_numero(linha_resumo["Qtde Saldo"]),
-                    formatar_moeda(linha_resumo["Valor Pedido"]),
-                    formatar_moeda(linha_resumo["Valor Bloqueado"]),
-                    formatar_moeda(linha_resumo["Valor Liberado"]),
-                    linha_resumo["Status"],
+                    cliente,
+                    formatar_numero(qtde_pedido),
+                    formatar_moeda(valor_pedido),
+                    data_faturamento,
+                    "Faturado hoje",
                 ),
                 open=True,
                 tags=("pedido", "faturado_pedido"),
@@ -314,46 +461,38 @@ class FaturadosTab:
 
             self.mapa_pedidos[iid_pedido] = str(pedido)
             total_pedidos += 1
-            total_itens += int(linha_resumo["Qtd. Itens"])
-            valor_total += float(linha_resumo["Valor Pedido"])
-            valor_liberado += float(linha_resumo["Valor Liberado"])
 
-            if not df.empty:
-                coluna_pedido = "Pedido Texto" if "Pedido Texto" in df.columns else "Pedido"
-                grupo = df[df[coluna_pedido].astype(str) == str(pedido)]
+            for item_indice, (_, linha) in enumerate(grupo.iterrows(), start=1):
+                item = str(linha.get("Item", ""))
+                descricao = str(linha.get("Descrição Item", ""))
+                obs = str(linha.get("OBS", "") or "").strip()
+                status_item = obs if obs else "Faturado"
+                iid_item = f"faturado_item_{indice}_{item_indice}"
 
-                for _, linha in grupo.iterrows():
-                    id_linha = int(linha["ID Linha"]) if "ID Linha" in linha else len(self.mapa_pedidos) + 1
-                    iid_item = f"faturado_item_{id_linha}"
-                    bloqueado = bool(linha.get("_Bloqueado", False))
-                    status_item = f'✕ {linha.get("_Tipo Bloqueio", "Bloqueado")}' if bloqueado else "✓ Liberado"
+                self.tabela.insert(
+                    iid_pedido,
+                    "end",
+                    iid=iid_item,
+                    text=f"{item} - {descricao}" if descricao else item,
+                    values=(
+                        "",
+                        formatar_numero(linha.get("Qtde", 0)),
+                        formatar_moeda(linha.get("Valor Total Faturamento", 0)),
+                        "",
+                        status_item,
+                    ),
+                    tags=("faturado_item",),
+                )
 
-                    self.tabela.insert(
-                        iid_pedido,
-                        "end",
-                        iid=iid_item,
-                        text=f'{linha["Item"]} - {linha["Descrição Item"]}',
-                        values=(
-                            datas.get(str(pedido), ""),
-                            "",
-                            "",
-                            formatar_numero(linha["Saldo a Faturar"]),
-                            formatar_moeda(linha["Valor em Carteira"]),
-                            formatar_moeda(linha.get("_Valor Bloqueado", 0)),
-                            formatar_moeda(linha.get("_Valor Liberado", linha["Valor em Carteira"])),
-                            status_item,
-                        ),
-                        tags=("faturado_item",),
-                    )
-
-        self.atualizar_resumo(total_pedidos, total_itens, valor_total, valor_liberado)
+        self.atualizar_resumo(total_pedidos, total_itens, total_qtde, valor_total)
         self.aplicar_ordenacao()
 
-    def atualizar_resumo(self, pedidos, itens, valor_total, valor_liberado):
-        self.label_pedidos.config(text=f"Pedidos faturados: {pedidos}")
+    def atualizar_resumo(self, pedidos, itens, qtde_total, valor_total):
+        self.label_data.config(text=f"Data: {self.data_hoje()}")
+        self.label_pedidos.config(text=f"Pedidos: {pedidos}")
         self.label_itens.config(text=f"Itens: {itens}")
-        self.label_valor_total.config(text=f"Valor total: {formatar_moeda(valor_total)}")
-        self.label_valor_liberado.config(text=f"Valor liberado: {formatar_moeda(valor_liberado)}")
+        self.label_qtde.config(text=f"Qtde: {formatar_numero(qtde_total)}")
+        self.label_valor_total.config(text=f"Total faturado: {formatar_moeda(valor_total)}")
 
     def get_selected_pedido(self):
         selecionado = self.tabela.selection()

@@ -96,6 +96,7 @@ class ConfigManager:
                 "pedidos_prog2": [],
                 "pedidos_faturados": [],
                 "datas_faturamento_pedido": {},
+                "registros_faturamento": [],
                 "pendencias_prog2": {},
                 "motivos_linha": {},
                 "motivos_item": {},

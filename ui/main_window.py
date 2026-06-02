@@ -98,6 +98,7 @@ class MainWindow:
             "Pedidos": getattr(self, "pedidos_tab", None),
             "PROG 2": getattr(self, "prog2_tab", None),
             "Faturados": getattr(self, "faturados_tab", None),
+            "Faturados Dia": getattr(self, "faturados_tab", None),
             "Atrasados": getattr(self, "atrasados_tab", None),
             "Bloqueios": getattr(self, "bloqueios_tab", None),
             "Gargalos": getattr(self, "gargalos_tab", None),
@@ -138,7 +139,7 @@ class MainWindow:
         if nome_aba == "Bloqueios":
             self.liberar_bloqueio_na_aba()
             return "break"
-        if nome_aba == "Faturados" and hasattr(aba, "remover_selecionado"):
+        if nome_aba in ("Faturados", "Faturados Dia") and hasattr(aba, "remover_selecionado"):
             aba.remover_selecionado()
             return "break"
         return None
@@ -312,7 +313,7 @@ class MainWindow:
 
         self.abas.add(aba_pedidos, text="Pedidos")
         self.abas.add(aba_prog2, text="PROG 2")
-        self.abas.add(aba_faturados, text="Faturados")
+        self.abas.add(aba_faturados, text="Faturados Dia")
         self.abas.add(aba_atrasados, text="Atrasados")
         self.abas.add(aba_bloqueios, text="Bloqueios")
         self.abas.add(aba_gargalos, text="Gargalos")
@@ -1498,7 +1499,8 @@ class MainWindow:
         if not confirmar:
             return
 
-        self.faturamento_service.fechar_prog2()
+        df_fechamento = self.obter_df_com_bloqueios_cache()
+        self.faturamento_service.fechar_prog2(df_fechamento=df_fechamento)
         self.invalidar_cache()
         self.refresh_all()
         self.salvar_estado_atual()
@@ -1958,6 +1960,37 @@ class MainWindow:
             self.registrar_erro("Erro ao exportar Excel completo", erro)
             messagebox.showerror("Erro ao exportar Excel", str(erro))
 
+    def exportar_faturados_dia(self):
+        df_exportar = self.faturados_tab.get_export_df(incluir_total=True)
+
+        if df_exportar is None or df_exportar.empty:
+            messagebox.showwarning("Nenhum faturamento", "Não há faturamentos do dia para exportar.")
+            return
+
+        data_arquivo = datetime.now().strftime("%Y%m%d")
+        caminho_inicial = getattr(self.config_manager, "export_dir", None)
+        initialdir = str(caminho_inicial) if caminho_inicial else None
+
+        caminho = filedialog.asksaveasfilename(
+            title="Exportar faturados do dia",
+            initialdir=initialdir,
+            initialfile=f"faturados_dia_{data_arquivo}.xlsx",
+            defaultextension=".xlsx",
+            filetypes=[("Arquivo Excel", "*.xlsx")]
+        )
+
+        if not caminho:
+            return
+
+        try:
+            exportar_dataframe_excel(caminho, df_exportar, "Faturados do Dia")
+            messagebox.showinfo("Exportação concluída", f"Faturados do dia exportados com sucesso:\n{caminho}")
+            self.set_status(f"Faturados do dia exportados: {caminho}")
+
+        except Exception as erro:
+            self.registrar_erro("Erro ao exportar faturados do dia", erro)
+            messagebox.showerror("Erro ao exportar faturados do dia", str(erro))
+
     def exportar_csv_atual(self):
         if not self.state.tem_dados():
             messagebox.showwarning("Nenhum arquivo importado", "Importe um CSV antes de exportar.")
@@ -1969,8 +2002,8 @@ class MainWindow:
             df_exportar = self.state.gerar_df_pedidos_ajustados()
         elif aba_atual == "PROG 2":
             df_exportar = self.state.gerar_df_prog2()
-        elif aba_atual == "Faturados":
-            df_exportar = self.faturados_tab.get_current_df()
+        elif aba_atual in ("Faturados", "Faturados Dia"):
+            df_exportar = self.faturados_tab.get_export_df(incluir_total=True)
         elif aba_atual == "Atrasados":
             df_exportar = self.atrasados_tab.get_current_df()
         elif aba_atual == "Bloqueios":

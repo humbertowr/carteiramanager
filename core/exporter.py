@@ -1,6 +1,7 @@
 from datetime import datetime
 
 import pandas as pd
+from openpyxl.styles import Border, Font, Side
 
 from core.carteira_processor import obter_consolidacao
 from core.formatters import formatar_numero
@@ -129,6 +130,41 @@ def exportar_dataframe_excel(caminho, df, sheet_name="Dados"):
         )
 
         worksheet = writer.sheets[sheet_name[:31]]
+
+        borda_fina = Border(
+            left=Side(style="thin"),
+            right=Side(style="thin"),
+            top=Side(style="thin"),
+            bottom=Side(style="thin"),
+        )
+
+        formato_moeda = '"R$" #,##0.00'
+        colunas_moeda = set()
+
+        for cell in worksheet[1]:
+            if cell.value not in (None, ""):
+                cell.font = Font(bold=True)
+                cell.border = borda_fina
+
+                cabecalho = str(cell.value).upper()
+                if "VALOR" in cabecalho or cabecalho.startswith("VLR"):
+                    colunas_moeda.add(cell.column)
+
+        for row in worksheet.iter_rows(min_row=2, max_col=worksheet.max_column):
+            linha_tem_conteudo = any(cell.value not in (None, "") for cell in row)
+            if not linha_tem_conteudo:
+                continue
+
+            linha_total = str(row[0].value or "").strip().upper().startswith("TOTAL")
+
+            for cell in row:
+                cell.border = borda_fina
+
+                if linha_total:
+                    cell.font = Font(bold=True)
+
+                if cell.column in colunas_moeda and cell.value not in (None, ""):
+                    cell.number_format = formato_moeda
 
         for coluna_cells in worksheet.columns:
             tamanho_maximo = 0

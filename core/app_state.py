@@ -107,6 +107,7 @@ class AppState:
         self.pedidos_prog2 = []
         self.pedidos_faturados = set()
         self.datas_faturamento_pedido = {}
+        self.registros_faturamento = []
         self.pendencias_prog2 = {}
 
         self.motivos_linha = {}
@@ -142,6 +143,7 @@ class AppState:
         self.pedidos_prog2.clear()
         self.pedidos_faturados.clear()
         self.datas_faturamento_pedido.clear()
+        self.registros_faturamento.clear()
         self.pendencias_prog2.clear()
 
         self.motivos_linha.clear()

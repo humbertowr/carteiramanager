@@ -12,6 +12,7 @@ class EstadoService:
             "pedidos_prog2": [str(item) for item in state.pedidos_prog2],
             "pedidos_faturados": sorted(str(item) for item in state.pedidos_faturados),
             "datas_faturamento_pedido": {str(k): str(v) for k, v in state.datas_faturamento_pedido.items()},
+            "registros_faturamento": [dict(registro) for registro in getattr(state, "registros_faturamento", [])],
             "pendencias_prog2": {str(int(k)): str(v) for k, v in state.pendencias_prog2.items()},
             "motivos_linha": {str(k): v for k, v in state.motivos_linha.items()},
             "motivos_item": dict(state.motivos_item),
@@ -69,6 +70,13 @@ class EstadoService:
             str(k): str(v)
             for k, v in estado.get("datas_faturamento_pedido", {}).items()
         }
+
+        registros_faturamento = estado.get("registros_faturamento", [])
+        state.registros_faturamento = [
+            dict(registro)
+            for registro in registros_faturamento
+            if isinstance(registro, dict)
+        ]
 
         state.pedidos_prog2 = [
             str(item)
