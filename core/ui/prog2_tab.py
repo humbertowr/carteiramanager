@@ -3,15 +3,7 @@ from tkinter import ttk
 
 from core.formatters import converter_valor_digitado, formatar_moeda, formatar_numero
 from ui.styles import CORES, FONTE, configurar_tags_tabela
-from ui.ux_helpers import (
-    abrir_janela_detalhes,
-    aplicar_estado_vazio_treeview,
-    aplicar_tooltip,
-    copiar_para_clipboard,
-    criar_cabecalho_aba,
-    criar_menu_contexto,
-    obter_texto_linha_treeview,
-)
+from ui.ux_helpers import abrir_janela_detalhes, copiar_para_clipboard, criar_menu_contexto, obter_texto_linha_treeview
 
 
 MOTIVOS_PENDENCIA_PROG2 = (
@@ -79,7 +71,6 @@ class Prog2Tab:
         container = ttk.Frame(self.parent, padding=(8, 6))
         container.pack(fill="both", expand=True)
 
-        criar_cabecalho_aba(container, "PROG 2", "Pedidos e itens selecionados para pré-faturamento.")
         self.criar_topo(container)
         self.criar_tabela(container)
         self.criar_menu_contexto()
@@ -118,7 +109,7 @@ class Prog2Tab:
 
         ttk.Button(
             linha_principal,
-            text="Fechar",
+            text="Fechar faturamento",
             command=self.controller.fechar_faturamento_prog2,
             style="Primary.TButton"
         ).grid(row=0, column=7, sticky="e", padx=(8, 0))
@@ -213,7 +204,7 @@ class Prog2Tab:
         menu_button.pack(side="left", padx=(4, 0))
 
     def criar_resumo(self, parent):
-        frame_resumo = ttk.LabelFrame(parent, text="Resumo", padding=(7, 5), style="Section.TLabelframe")
+        frame_resumo = ttk.LabelFrame(parent, text="Resumo", padding=(8, 5), style="Section.TLabelframe")
         frame_resumo.pack(fill="x", pady=(0, 5))
 
         self.label_pedidos = ttk.Label(frame_resumo, text="Pedidos: 0", style="SummaryValue.TLabel")
@@ -234,7 +225,7 @@ class Prog2Tab:
         frame_resumo.columnconfigure(5, weight=1)
 
     def criar_metas(self, parent):
-        frame_meta = ttk.LabelFrame(parent, text="Meta de faturamento", padding=(7, 5), style="Section.TLabelframe")
+        frame_meta = ttk.LabelFrame(parent, text="Meta de faturamento", padding=(8, 5), style="Section.TLabelframe")
         frame_meta.pack(fill="x", pady=(0, 5))
 
         metas = (
@@ -724,7 +715,6 @@ class Prog2Tab:
         self.atualizar_cabecalhos()
 
         if not self.state.tem_dados():
-            aplicar_estado_vazio_treeview(self.tabela, "Nenhuma carteira carregada. Importe um CSV para iniciar.")
             self.atualizar_labels(0, 0, 0, 0, 0)
             return
 
@@ -864,8 +854,6 @@ class Prog2Tab:
             valor_liberado_lista += dados["valor_liberado"]
 
         self.pedidos_marcados = {pedido for pedido in self.pedidos_marcados if pedido in pedidos_visiveis}
-        if pedidos_exibidos == 0:
-            aplicar_estado_vazio_treeview(self.tabela, "Nenhum pedido no PROG 2. Adicione pedidos pela aba Pedidos ou pela Simulação.")
         self.atualizar_labels(pedidos_exibidos, itens_exibidos, valor_total_lista, valor_liberado_lista, itens_pendentes)
 
     def atualizar_labels(self, pedidos, itens, valor_total, valor_liberado, itens_pendentes=0):

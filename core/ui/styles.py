@@ -4,14 +4,14 @@ from tkinter import ttk
 FONTE = "Segoe UI"
 
 CORES = {
-    "bg": "#f6f8fb",
+    "bg": "#eef2f7",
     "card": "#ffffff",
-    "card_soft": "#f9fbfd",
+    "card_soft": "#f8fafc",
     "border": "#d7dee8",
     "border_soft": "#e5eaf1",
     "text": "#111827",
     "muted": "#64748b",
-    "header": "#e7ecf3",
+    "header": "#e8edf5",
     "topbar": "#0f172a",
     "topbar_2": "#111827",
     "topbar_button": "#1e293b",
@@ -63,7 +63,7 @@ def configurar_estilo():
 
     estilo.configure(
         "TopBarTitle.TLabel",
-        font=(FONTE, 15, "bold"),
+        font=(FONTE, 16, "bold"),
         background=CORES["topbar"],
         foreground=CORES["topbar_text"],
         padding=(0, 1),
@@ -77,16 +77,9 @@ def configurar_estilo():
     )
 
     estilo.configure(
-        "DetailTitle.TLabel",
-        font=(FONTE, 13, "bold"),
-        background=CORES["bg"],
-        foreground=CORES["text"],
-    )
-
-    estilo.configure(
         "TopMenu.TMenubutton",
         font=(FONTE, 9, "bold"),
-        padding=(11, 5),
+        padding=(13, 7),
         background=CORES["topbar_button"],
         foreground=CORES["topbar_text"],
         borderwidth=0,
@@ -268,7 +261,7 @@ def configurar_estilo():
         font=(FONTE, 9, "bold"),
         background=CORES["header"],
         foreground=CORES["text"],
-        padding=(6, 4),
+        padding=(6, 5),
         relief="flat",
     )
 
@@ -281,7 +274,7 @@ def configurar_estilo():
     estilo.configure(
         "TButton",
         font=(FONTE, 8),
-        padding=(8, 4),
+        padding=(7, 3),
         background=CORES["header"],
         foreground=CORES["text"],
         borderwidth=1,
@@ -295,20 +288,13 @@ def configurar_estilo():
     estilo.configure(
         "Compact.TButton",
         font=(FONTE, 8),
-        padding=(7, 4),
-    )
-
-    estilo.configure(
-        "Secondary.TButton",
-        font=(FONTE, 8),
-        padding=(8, 4),
-        foreground=CORES["text"],
+        padding=(6, 3),
     )
 
     estilo.configure(
         "Primary.TButton",
         font=(FONTE, 8, "bold"),
-        padding=(8, 4),
+        padding=(9, 4),
         background=CORES["primary"],
         foreground="#ffffff",
     )
@@ -322,28 +308,28 @@ def configurar_estilo():
     estilo.configure(
         "Success.TButton",
         font=(FONTE, 8, "bold"),
-        padding=(8, 4),
+        padding=(9, 4),
         foreground=CORES["success_fg"],
     )
 
     estilo.configure(
         "Danger.TButton",
         font=(FONTE, 8, "bold"),
-        padding=(8, 4),
+        padding=(9, 4),
         foreground=CORES["danger_fg"],
     )
 
     estilo.configure(
         "Subtle.TButton",
         font=(FONTE, 8),
-        padding=(6, 3),
+        padding=(7, 3),
         foreground=CORES["muted"],
     )
 
     estilo.configure(
         "TMenubutton",
         font=(FONTE, 8, "bold"),
-        padding=(8, 4),
+        padding=(7, 3),
         background=CORES["header"],
         foreground=CORES["text"],
         arrowcolor=CORES["muted"],
@@ -366,102 +352,6 @@ def configurar_estilo():
         arrowcolor=CORES["muted"],
     )
 
-
-    estilo.configure(
-        "StatusBar.TFrame",
-        background=CORES["card"],
-        borderwidth=1,
-        relief="solid",
-    )
-
-    estilo.configure(
-        "StatusMessage.TLabel",
-        font=(FONTE, 8),
-        background=CORES["card"],
-        foreground=CORES["muted"],
-        padding=(8, 4),
-    )
-
-    estilo.configure(
-        "StatusChip.TLabel",
-        font=(FONTE, 8, "bold"),
-        background=CORES["card_soft"],
-        foreground=CORES["text"],
-        padding=(7, 3),
-    )
-
-    estilo.configure(
-        "StatusOk.TLabel",
-        font=(FONTE, 8, "bold"),
-        background=CORES["success_bg"],
-        foreground=CORES["success_fg"],
-        padding=(7, 3),
-    )
-
-    estilo.configure(
-        "StatusWarning.TLabel",
-        font=(FONTE, 8, "bold"),
-        background=CORES["warning_bg"],
-        foreground=CORES["warning_fg"],
-        padding=(7, 3),
-    )
-
-    estilo.configure(
-        "StatusDanger.TLabel",
-        font=(FONTE, 8, "bold"),
-        background=CORES["danger_bg"],
-        foreground=CORES["danger_fg"],
-        padding=(7, 3),
-    )
-
-
-    estilo.configure(
-        "PageHeader.TFrame",
-        background=CORES["bg"],
-    )
-
-    estilo.configure(
-        "PageTitle.TLabel",
-        font=(FONTE, 12, "bold"),
-        background=CORES["bg"],
-        foreground=CORES["text"],
-    )
-
-    estilo.configure(
-        "PageSubtitle.TLabel",
-        font=(FONTE, 8),
-        background=CORES["bg"],
-        foreground=CORES["muted"],
-    )
-
-    estilo.configure(
-        "ActionBar.TFrame",
-        background=CORES["card"],
-        borderwidth=1,
-        relief="solid",
-    )
-
-    estilo.configure(
-        "DetailKey.TLabel",
-        font=(FONTE, 9, "bold"),
-        background=CORES["card"],
-        foreground=CORES["text"],
-    )
-
-    estilo.configure(
-        "DetailValue.TLabel",
-        font=(FONTE, 9),
-        background=CORES["card"],
-        foreground=CORES["text"],
-    )
-
-    estilo.configure(
-        "DetailSection.TLabel",
-        font=(FONTE, 10, "bold"),
-        background=CORES["card"],
-        foreground=CORES["text"],
-    )
-
     estilo.configure(
         "TNotebook",
         background=CORES["bg"],
@@ -472,7 +362,7 @@ def configurar_estilo():
     estilo.configure(
         "TNotebook.Tab",
         font=(FONTE, 9, "bold"),
-        padding=(11, 5),
+        padding=(12, 6),
         background=CORES["header"],
         foreground=CORES["muted"],
     )
@@ -496,4 +386,3 @@ def configurar_tags_tabela(tabela):
     tabela.tag_configure("item_marcado", background=CORES["selected_batch_item_bg"], foreground=CORES["selected_batch_fg"])
     tabela.tag_configure("prog2", background=CORES["info_bg"], foreground=CORES["info_fg"], font=(FONTE, 9, "bold"))
     tabela.tag_configure("linha_alt", background=CORES["row_alt"])
-    tabela.tag_configure("estado_vazio", foreground=CORES["muted"], font=(FONTE, 9, "italic"))

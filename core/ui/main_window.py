@@ -17,27 +17,22 @@ from core.exporter import (
     exportar_excel_completo,
     exportar_dataframe_excel,
     exportar_dataframe_pdf,
-    exportar_faturados_dia_excel,
-    exportar_simulacao_faturamento_excel,
 )
 from core.formatters import formatar_moeda, formatar_numero
-from core.app_info import APP_NAME, APP_VERSION, APP_BUILD, APP_ENVIRONMENT
 from ui.styles import CORES, configurar_estilo
 from ui.pedidos_tab import PedidosTab
 from ui.prog2_tab import Prog2Tab
 from ui.faturados_tab import FaturadosTab
-from ui.simulacao_semanal_tab import SimulacaoSemanalTab
-from ui.gargalos_tab import GargalosTab
+from ui.atrasados_tab import AtrasadosTab
 from ui.bloqueios_tab import BloqueiosTab
-from ui.historico_tab import HistoricoTab
+from ui.consolidacoes_tab import ConsolidacoesTab
+from ui.gargalos_tab import GargalosTab
 from ui.sortable_tree import aplicar_ordenacao_treeview
-from ui.ux_helpers import confirmar_acao, mostrar_erro_operacional
 from services.cache_service import CarteiraCacheService
 from services.estado_service import EstadoService
 from services.exportacao_service import ExportacaoService
 from services.faturamento_service import FaturamentoService
 from services.importacao_service import ImportacaoService
-from services.version_service import VersionService
 
 
 class MainWindow:
@@ -64,14 +59,6 @@ class MainWindow:
 
         self.config_manager = ConfigManager()
         self.config = self.config_manager.carregar()
-        self.version_service = VersionService(self.config_manager)
-        self.version_check = self.version_service.verificar(APP_VERSION)
-        self.ultimo_mtime_estado = self.obter_mtime_estado()
-        self.ultima_sincronizacao = self.config.get("_sistema", {}).get("atualizado_em", "")
-
-        if self.version_check.get("blocked"):
-            self.bloquear_versao_antiga()
-            return
 
         self.ultimo_arquivo_importado = self.config.get("ultimo_csv", "")
         self.observacoes_internas = self.config.setdefault("observacoes_internas", {})
@@ -83,19 +70,13 @@ class MainWindow:
         self.log_path = self.log_dir / "app.log"
 
         self.criar_interface()
-        self.atualizar_barra_status_sistema()
         self.root.after(300, self.inicializar_dados_ao_abrir)
-        self.root.after(900, self.notificar_atualizacao_se_necessario)
-        self.root.after(30000, self.monitorar_sincronizacao_compartilhada)
 
     def criar_interface(self):
         self.criar_topo()
         self.criar_resumo()
-        # A barra de status precisa ser empacotada antes da área expansível.
-        # Caso contrário, o Notebook pode ocupar toda a altura disponível e
-        # empurrar o rodapé para fora da janela em resoluções menores.
-        self.criar_barra_status()
         self.criar_abas()
+        self.criar_barra_status()
         self.registrar_atalhos()
 
     def registrar_atalhos(self):
@@ -116,12 +97,12 @@ class MainWindow:
         mapa = {
             "Pedidos": getattr(self, "pedidos_tab", None),
             "PROG 2": getattr(self, "prog2_tab", None),
-            "Simulação Semanal": getattr(self, "simulacao_semanal_tab", None),
             "Faturados": getattr(self, "faturados_tab", None),
             "Faturados Dia": getattr(self, "faturados_tab", None),
-            "Gargalos": getattr(self, "gargalos_tab", None),
+            "Atrasados": getattr(self, "atrasados_tab", None),
             "Bloqueios": getattr(self, "bloqueios_tab", None),
-            "Histórico": getattr(self, "historico_tab", None),
+            "Gargalos": getattr(self, "gargalos_tab", None),
+            "Consolidações": getattr(self, "consolidacoes_tab", None),
         }
         return texto, mapa.get(texto)
 
@@ -155,11 +136,11 @@ class MainWindow:
         if nome_aba == "PROG 2":
             self.remover_pedido_selecionado_prog2()
             return "break"
-        if nome_aba in ("Faturados", "Faturados Dia") and hasattr(aba, "remover_selecionado"):
-            aba.remover_selecionado()
-            return "break"
         if nome_aba == "Bloqueios":
             self.liberar_bloqueio_na_aba()
+            return "break"
+        if nome_aba in ("Faturados", "Faturados Dia") and hasattr(aba, "remover_selecionado"):
+            aba.remover_selecionado()
             return "break"
         return None
 
@@ -188,7 +169,7 @@ class MainWindow:
 
         ttk.Label(
             bloco_titulo,
-            text="Carteira, PROG 2, simulação, faturamento, gargalos e histórico em uma visão única.",
+            text="Carteira, bloqueios, PROG 2, faturamento e gargalos em uma visão única.",
             style="TopBarSubtitle.TLabel",
         ).pack(anchor="w", pady=(1, 0))
 
@@ -220,7 +201,7 @@ class MainWindow:
 
         menu.add_command(label="Importar CSV", command=self.importar_csv)
         menu.add_command(label="Recarregar último CSV", command=self.recarregar_ultimo_csv)
-        menu.add_command(label="Atualizar dados", command=self.atualizar_dados_compartilhados)
+        menu.add_command(label="Atualizar dados compartilhados", command=self.atualizar_dados_compartilhados)
         menu.add_separator()
         menu.add_command(label="Salvar estado agora", command=self.salvar_estado_manual)
         menu.add_separator()
@@ -260,8 +241,8 @@ class MainWindow:
         botao = ttk.Menubutton(parent, text="Exportar  ▾", style="TopMenu.TMenubutton")
         menu = self.criar_menu_popup(botao)
 
-        menu.add_command(label="Relatório Excel", command=self.exportar_excel)
-        menu.add_command(label="Aba atual CSV", command=self.exportar_csv_atual)
+        menu.add_command(label="Relatório completo em Excel", command=self.exportar_excel)
+        menu.add_command(label="Aba atual em CSV", command=self.exportar_csv_atual)
 
         botao["menu"] = menu
         botao.pack(side="left", padx=(6, 0), ipady=1)
@@ -270,8 +251,6 @@ class MainWindow:
         botao = ttk.Menubutton(parent, text="Ajuda  ▾", style="TopMenu.TMenubutton")
         menu = self.criar_menu_popup(botao)
 
-        menu.add_command(label="Abrir histórico", command=self.abrir_aba_historico)
-        menu.add_command(label="Verificar atualizações", command=self.verificar_atualizacoes_manual)
         menu.add_command(label="Abrir arquivo de log", command=self.abrir_log)
         menu.add_command(label="Sobre", command=self.mostrar_sobre)
 
@@ -311,27 +290,27 @@ class MainWindow:
 
         aba_pedidos = ttk.Frame(self.abas)
         aba_prog2 = ttk.Frame(self.abas)
-        aba_simulacao = ttk.Frame(self.abas)
         aba_faturados = ttk.Frame(self.abas)
-        aba_gargalos = ttk.Frame(self.abas)
+        aba_atrasados = ttk.Frame(self.abas)
         aba_bloqueios = ttk.Frame(self.abas)
-        aba_historico = ttk.Frame(self.abas)
+        aba_gargalos = ttk.Frame(self.abas)
+        aba_consolidacoes = ttk.Frame(self.abas)
 
         self.abas.add(aba_pedidos, text="Pedidos")
         self.abas.add(aba_prog2, text="PROG 2")
-        self.abas.add(aba_simulacao, text="Simulação Semanal")
         self.abas.add(aba_faturados, text="Faturados Dia")
-        self.abas.add(aba_gargalos, text="Gargalos")
+        self.abas.add(aba_atrasados, text="Atrasados")
         self.abas.add(aba_bloqueios, text="Bloqueios")
-        self.abas.add(aba_historico, text="Histórico")
+        self.abas.add(aba_gargalos, text="Gargalos")
+        self.abas.add(aba_consolidacoes, text="Consolidações")
 
         self.pedidos_tab = PedidosTab(aba_pedidos, self, self.state)
         self.prog2_tab = Prog2Tab(aba_prog2, self, self.state)
-        self.simulacao_semanal_tab = SimulacaoSemanalTab(aba_simulacao, self, self.state)
         self.faturados_tab = FaturadosTab(aba_faturados, self, self.state)
-        self.gargalos_tab = GargalosTab(aba_gargalos, self, self.state)
+        self.atrasados_tab = AtrasadosTab(aba_atrasados, self, self.state)
         self.bloqueios_tab = BloqueiosTab(aba_bloqueios, self, self.state)
-        self.historico_tab = HistoricoTab(aba_historico, self)
+        self.gargalos_tab = GargalosTab(aba_gargalos, self, self.state)
+        self.consolidacoes_tab = ConsolidacoesTab(aba_consolidacoes, self, self.state)
 
         self.aplicar_ordenacao_tabelas()
 
@@ -339,11 +318,11 @@ class MainWindow:
         abas = [
             getattr(self, "pedidos_tab", None),
             getattr(self, "prog2_tab", None),
-            getattr(self, "simulacao_semanal_tab", None),
             getattr(self, "faturados_tab", None),
-            getattr(self, "gargalos_tab", None),
+            getattr(self, "atrasados_tab", None),
             getattr(self, "bloqueios_tab", None),
-            getattr(self, "historico_tab", None),
+            getattr(self, "gargalos_tab", None),
+            getattr(self, "consolidacoes_tab", None),
         ]
 
         for aba in abas:
@@ -361,192 +340,18 @@ class MainWindow:
         if self.ultimo_arquivo_importado:
             texto = f"Último CSV salvo: {self.ultimo_arquivo_importado}"
 
-        frame = ttk.Frame(self.root, padding=(6, 3), style="StatusBar.TFrame")
-        frame.pack(fill="x", side="bottom")
-        self.barra_status = frame
-
         self.status = ttk.Label(
-            frame,
+            self.root,
             text=texto,
+            relief="flat",
             anchor="w",
-            style="StatusMessage.TLabel",
+            padding=(10, 5),
+            style="Hint.TLabel"
         )
-        self.status.pack(side="left", fill="x", expand=True)
-
-        self.status_sync = ttk.Label(frame, text="Sync: -", style="StatusChip.TLabel")
-        self.status_sync.pack(side="right", padx=(5, 0))
-
-        self.status_servidor = ttk.Label(frame, text="Servidor: -", style="StatusChip.TLabel")
-        self.status_servidor.pack(side="right", padx=(5, 0))
-
-        self.status_modo = ttk.Label(frame, text="Modo: -", style="StatusChip.TLabel")
-        self.status_modo.pack(side="right", padx=(5, 0))
-
-        usuario = getattr(self.config_manager, "usuario", "Usuário")
-        self.status_usuario = ttk.Label(frame, text=f"Usuário: {usuario}", style="StatusChip.TLabel")
-        self.status_usuario.pack(side="right", padx=(5, 0))
-
-        self.status_versao = ttk.Label(frame, text=f"v{APP_VERSION}", style="StatusChip.TLabel")
-        self.status_versao.pack(side="right", padx=(5, 0))
+        self.status.pack(fill="x", side="bottom")
 
     def set_status(self, texto):
-        if hasattr(self, "status"):
-            hora = datetime.now().strftime("%H:%M")
-            self.status.config(text=f"{hora} · {texto}")
-
-    def obter_mtime_estado(self):
-        try:
-            caminho = getattr(self.config_manager, "config_path", None)
-            if caminho and Path(caminho).exists():
-                return Path(caminho).stat().st_mtime
-        except Exception:
-            pass
-        return None
-
-    def servidor_disponivel(self):
-        try:
-            caminho = getattr(self.config_manager, "config_path", None)
-            if not caminho:
-                return True
-            pasta = Path(caminho).parent
-            return pasta.exists() and os.access(str(pasta), os.R_OK | os.W_OK)
-        except Exception:
-            return False
-
-    def atualizar_barra_status_sistema(self, sync_texto=None, sync_estilo=None):
-        if not hasattr(self, "status_versao"):
-            return
-
-        update_available = bool(getattr(self, "version_check", {}).get("update_available"))
-        latest = getattr(self, "version_check", {}).get("latest_version", APP_VERSION)
-
-        if update_available:
-            self.status_versao.config(text=f"v{APP_VERSION} → {latest}", style="StatusWarning.TLabel")
-        else:
-            self.status_versao.config(text=f"v{APP_VERSION}", style="StatusChip.TLabel")
-
-        modo_compartilhado = bool(getattr(self.config_manager, "modo_compartilhado", False))
-        ambiente = "Compartilhado" if modo_compartilhado else "Local"
-        self.status_modo.config(text=f"Modo: {ambiente}", style="StatusOk.TLabel" if modo_compartilhado else "StatusChip.TLabel")
-
-        usuario = getattr(self.config_manager, "usuario", "Usuário")
-        self.status_usuario.config(text=f"Usuário: {usuario}")
-
-        if modo_compartilhado:
-            servidor_ok = self.servidor_disponivel()
-            self.status_servidor.config(
-                text="Servidor: OK" if servidor_ok else "Servidor: falha",
-                style="StatusOk.TLabel" if servidor_ok else "StatusDanger.TLabel",
-            )
-        else:
-            self.status_servidor.config(text="Servidor: local", style="StatusChip.TLabel")
-
-        if sync_texto:
-            self.status_sync.config(text=sync_texto, style=sync_estilo or "StatusChip.TLabel")
-            return
-
-        sistema = self.config.get("_sistema", {}) if isinstance(self.config, dict) else {}
-        atualizado_em = sistema.get("atualizado_em") or self.ultima_sincronizacao or "-"
-        atualizado_por = sistema.get("atualizado_por") or ""
-
-        texto = f"Sync: {atualizado_em[-8:] if atualizado_em != '-' else '-'}"
-        if atualizado_por:
-            texto += f" · {atualizado_por}"
-        self.status_sync.config(text=texto, style="StatusChip.TLabel")
-
-    def registrar_sincronizacao(self, texto="Sincronizado"):
-        self.ultimo_mtime_estado = self.obter_mtime_estado()
-        sistema = self.config.get("_sistema", {}) if isinstance(self.config, dict) else {}
-        self.ultima_sincronizacao = sistema.get("atualizado_em") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        self.atualizar_barra_status_sistema(f"Sync: {texto} {datetime.now().strftime('%H:%M:%S')}", "StatusOk.TLabel")
-
-    def monitorar_sincronizacao_compartilhada(self):
-        try:
-            if getattr(self.config_manager, "modo_compartilhado", False):
-                mtime_atual = self.obter_mtime_estado()
-                if self.ultimo_mtime_estado and mtime_atual and mtime_atual > self.ultimo_mtime_estado + 1:
-                    self.atualizar_barra_status_sistema("Sync: alterações no servidor", "StatusWarning.TLabel")
-                else:
-                    self.atualizar_barra_status_sistema()
-            else:
-                self.atualizar_barra_status_sistema()
-        finally:
-            if hasattr(self, "root"):
-                self.root.after(30000, self.monitorar_sincronizacao_compartilhada)
-
-    def bloquear_versao_antiga(self):
-        latest = self.version_check.get("latest_version", "")
-        minimum = self.version_check.get("min_version", "")
-        download = self.version_check.get("download_path", "")
-        mensagem = self.version_check.get("message", "")
-
-        texto = (
-            "Esta versão do Carteira Manager está bloqueada para uso.\n\n"
-            f"Versão instalada: {APP_VERSION}\n"
-            f"Versão mínima exigida: {minimum}\n"
-            f"Última versão disponível: {latest}\n"
-        )
-        if download:
-            texto += f"\nAtualize pelo caminho:\n{download}\n"
-        if mensagem:
-            texto += f"\n{mensagem}"
-
-        messagebox.showerror("Versão desatualizada", texto)
-        self.root.after(100, self.root.destroy)
-
-    def verificar_atualizacoes_manual(self):
-        self.version_check = self.version_service.verificar(APP_VERSION)
-        self.atualizar_barra_status_sistema()
-
-        if self.version_check.get("blocked"):
-            self.bloquear_versao_antiga()
-            return
-
-        if self.version_check.get("update_available"):
-            self.exibir_mensagem_atualizacao()
-            return
-
-        if self.version_check.get("available"):
-            messagebox.showinfo(
-                "Atualizações",
-                f"Você já está usando a versão mais recente.\n\nVersão instalada: {APP_VERSION}"
-            )
-            return
-
-        erro = self.version_check.get("error")
-        detalhe = f"\n\nDetalhe: {erro}" if erro else ""
-        messagebox.showinfo(
-            "Atualizações",
-            "Nenhum arquivo de versão foi encontrado.\n\n"
-            f"Caminho verificado:\n{self.version_check.get('version_file', '')}{detalhe}"
-        )
-
-    def notificar_atualizacao_se_necessario(self):
-        if getattr(self, "_atualizacao_notificada", False):
-            return
-        if getattr(self, "version_check", {}).get("update_available"):
-            self._atualizacao_notificada = True
-            self.set_status(
-                f"Nova versão disponível: {self.version_check.get('latest_version')} | Versão atual: {APP_VERSION}"
-            )
-            self.atualizar_barra_status_sistema()
-
-    def exibir_mensagem_atualizacao(self):
-        latest = self.version_check.get("latest_version", "")
-        download = self.version_check.get("download_path", "")
-        mensagem = self.version_check.get("message", "")
-
-        texto = (
-            "Nova versão disponível.\n\n"
-            f"Versão instalada: {APP_VERSION}\n"
-            f"Versão disponível: {latest}\n"
-        )
-        if download:
-            texto += f"\nCaminho para atualização:\n{download}\n"
-        if mensagem:
-            texto += f"\n{mensagem}"
-
-        messagebox.showinfo("Atualização disponível", texto)
+        self.status.config(text=texto)
 
     def invalidar_cache(self):
         self.cache_service.invalidar()
@@ -600,12 +405,6 @@ class MainWindow:
             )
 
         self.config_manager.salvar(self.config)
-        self.registrar_sincronizacao("salvo")
-        if hasattr(self, "historico_tab"):
-            try:
-                self.historico_tab.refresh()
-            except Exception:
-                pass
 
     def salvar_estado_manual(self):
         self.salvar_estado_atual("Salvamento manual", "Usuário salvou o estado manualmente.")
@@ -629,11 +428,9 @@ class MainWindow:
     def inicializar_dados_ao_abrir(self):
         if not getattr(self.config_manager, "modo_compartilhado", False):
             self.set_status("Modo local ativo. Dados salvos neste computador.")
-            self.atualizar_barra_status_sistema()
             return
 
         self.set_status(f"Modo compartilhado ativo: {self.config_manager.config_path}")
-        self.registrar_sincronizacao("carregado")
 
         restaurar = self.config.get("settings", {}).get("restaurar_ultimo_csv_ao_abrir", True)
         ultimo_csv = self.config.get("ultimo_csv", "")
@@ -664,7 +461,6 @@ class MainWindow:
     def atualizar_dados_compartilhados(self):
         self.config = self.config_manager.carregar()
         self.ultimo_arquivo_importado = self.config.get("ultimo_csv", self.ultimo_arquivo_importado)
-        self.registrar_sincronizacao("atualizado")
 
         if self.state.tem_dados():
             self.restaurar_estado_salvo()
@@ -703,11 +499,7 @@ class MainWindow:
         else:
             self.observacoes_internas.pop(pedido, None)
 
-        self.salvar_estado_atual(
-            "Observação interna",
-            "Observação interna atualizada.",
-            pedido=pedido,
-        )
+        self.salvar_estado_atual()
         self.refresh_all()
         self.set_status(f"Observação interna atualizada para o pedido {pedido}.")
 
@@ -716,11 +508,7 @@ class MainWindow:
 
         if pedido in self.observacoes_internas:
             self.observacoes_internas.pop(pedido, None)
-            self.salvar_estado_atual(
-                "Observação interna",
-                "Observação interna removida.",
-                pedido=pedido,
-            )
+            self.salvar_estado_atual()
             self.refresh_all()
             self.set_status(f"Observação interna removida do pedido {pedido}.")
         else:
@@ -764,12 +552,7 @@ class MainWindow:
 
         self.invalidar_cache()
         self.refresh_all()
-        self.salvar_estado_atual(
-            "Pendência aplicada",
-            f"Motivo: {motivo}",
-            pedido=pedido,
-            item=str(linha["Item"]),
-        )
+        self.salvar_estado_atual()
         self.set_status(f"Pendência '{motivo}' aplicada ao item {linha['Item']} do pedido {pedido}.")
 
     def limpar_pendencia_prog2_item(self, id_linha):
@@ -782,12 +565,7 @@ class MainWindow:
         if self.state.limpar_pendencia_item_prog2(id_linha):
             self.invalidar_cache()
             self.refresh_all()
-            self.salvar_estado_atual(
-                "Pendência removida",
-                "Pendência removida do item no PROG 2.",
-                pedido=pedido,
-                item=str(linha["Item"]),
-            )
+            self.salvar_estado_atual()
             self.set_status(f"Pendência removida do item {linha['Item']} do pedido {pedido}.")
             return
 
@@ -810,15 +588,6 @@ class MainWindow:
             arquivo.write(traceback.format_exc())
             arquivo.write("\n")
 
-    def abrir_aba_historico(self):
-        if hasattr(self, "abas") and hasattr(self, "historico_tab"):
-            indice = self.abas.index("end")
-            for posicao in range(indice):
-                if self.abas.tab(posicao, "text") == "Histórico":
-                    self.abas.select(posicao)
-                    self.historico_tab.refresh()
-                    break
-
     def abrir_log(self):
         if not self.log_path.exists():
             self.log_path.write_text("Nenhum erro registrado até o momento.\n", encoding="utf-8")
@@ -826,90 +595,12 @@ class MainWindow:
         self.abrir_arquivo(str(self.log_path))
 
     def mostrar_sobre(self):
-        janela = tk.Toplevel(self.root)
-        janela.title("Sobre o Carteira Manager")
-        janela.geometry("720x440")
-        janela.minsize(640, 380)
-        janela.transient(self.root)
-        janela.grab_set()
-
-        frame = ttk.Frame(janela, padding=16)
-        frame.pack(fill="both", expand=True)
-
-        ttk.Label(
-            frame,
-            text=APP_NAME,
-            font=("Segoe UI", 16, "bold"),
-        ).pack(anchor="w")
-
-        ttk.Label(
-            frame,
-            text="Controle operacional de carteira, PROG 2, simulação e faturamento.",
-            style="Subtitle.TLabel",
-        ).pack(anchor="w", pady=(2, 12))
-
-        dados = self.obter_dados_sobre()
-        corpo = ttk.Frame(frame, style="Card.TFrame", padding=10)
-        corpo.pack(fill="both", expand=True)
-
-        for linha, (rotulo, valor) in enumerate(dados):
-            ttk.Label(corpo, text=rotulo, style="CardTitle.TLabel").grid(
-                row=linha, column=0, sticky="nw", padx=(0, 12), pady=3
-            )
-            ttk.Label(corpo, text=str(valor or "-"), style="Card.TLabel", wraplength=500).grid(
-                row=linha, column=1, sticky="nw", pady=3
-            )
-
-        corpo.columnconfigure(1, weight=1)
-
-        botoes = ttk.Frame(frame)
-        botoes.pack(fill="x", pady=(12, 0))
-
-        ttk.Button(
-            botoes,
-            text="Verificar atualizações",
-            command=self.verificar_atualizacoes_manual,
-            style="Primary.TButton",
-        ).pack(side="left")
-
-        ttk.Button(
-            botoes,
-            text="Abrir logs",
-            command=self.abrir_log,
-        ).pack(side="left", padx=(8, 0))
-
-        ttk.Button(
-            botoes,
-            text="Fechar",
-            command=janela.destroy,
-        ).pack(side="right")
-
-    def obter_dados_sobre(self):
-        modo = "Compartilhado" if getattr(self.config_manager, "modo_compartilhado", False) else "Local"
-        sistema = self.config.get("_sistema", {}) if isinstance(self.config, dict) else {}
-        versao = getattr(self, "version_check", {}) or {}
-
-        atualizacao = "Nenhuma atualização encontrada"
-        if versao.get("blocked"):
-            atualizacao = f"Versão bloqueada. Mínima exigida: {versao.get('min_version')}"
-        elif versao.get("update_available"):
-            atualizacao = f"Disponível: {versao.get('latest_version')}"
-        elif not versao.get("available"):
-            atualizacao = "Arquivo de versão não encontrado"
-
-        return [
-            ("Versão", f"{APP_VERSION} | Build {APP_BUILD}"),
-            ("Ambiente", APP_ENVIRONMENT),
-            ("Modo", modo),
-            ("Usuário", getattr(self.config_manager, "usuario", "Usuário")),
-            ("Pasta de dados", getattr(self.config_manager, "base_dir", "")),
-            ("Arquivo de estado", getattr(self.config_manager, "config_path", "")),
-            ("Última sincronização", sistema.get("atualizado_em", "")),
-            ("Última alteração por", sistema.get("atualizado_por", "")),
-            ("Atualização", atualizacao),
-            ("Arquivo de versão", versao.get("version_file", "")),
-            ("Log", self.log_path),
-        ]
+        messagebox.showinfo(
+            "Sobre",
+            "Carteira Manager\n\n"
+            "Aplicativo desktop para consolidação, bloqueio e programação de carteira de pedidos.\n\n"
+            f"Log local:\n{self.log_path}"
+        )
 
     def abrir_arquivo(self, caminho):
         try:
@@ -994,53 +685,25 @@ class MainWindow:
 
             self.set_status("Erro ao importar arquivo. Veja o log em Suporte > Abrir arquivo de log.")
 
-    def iterar_abas_ui(self, nomes=None):
-        pares = [
-            ("Pedidos", getattr(self, "pedidos_tab", None)),
-            ("PROG 2", getattr(self, "prog2_tab", None)),
-            ("Simulação Semanal", getattr(self, "simulacao_semanal_tab", None)),
-            ("Faturados Dia", getattr(self, "faturados_tab", None)),
-            ("Gargalos", getattr(self, "gargalos_tab", None)),
-            ("Bloqueios", getattr(self, "bloqueios_tab", None)),
-            ("Histórico", getattr(self, "historico_tab", None)),
-        ]
-
-        if nomes is None:
-            yield from pares
-            return
-
-        nomes = set(nomes)
-        for nome, aba in pares:
-            if nome in nomes:
-                yield nome, aba
-
-    def refresh_tabs(self, nomes=None):
-        for _, aba in self.iterar_abas_ui(nomes):
-            if aba is not None and hasattr(aba, "refresh"):
-                try:
-                    aba.refresh()
-                except Exception:
-                    pass
-
     def refresh_all(self):
         self.atualizar_resumo()
-        self.refresh_tabs()
+        self.pedidos_tab.refresh()
+        self.prog2_tab.refresh()
+        self.faturados_tab.refresh()
+        self.atrasados_tab.refresh()
+        self.bloqueios_tab.refresh()
+        self.gargalos_tab.refresh()
+        self.consolidacoes_tab.refresh()
         self.aplicar_ordenacao_tabelas()
-        self.atualizar_barra_status_sistema()
 
     def refresh_pedidos(self):
-        self.refresh_tabs([
-            "Pedidos",
-            "PROG 2",
-            "Simulação Semanal",
-            "Faturados Dia",
-            "Gargalos",
-            "Bloqueios",
-            "Histórico",
-        ])
+        self.pedidos_tab.refresh()
+        self.prog2_tab.refresh()
+        self.faturados_tab.refresh()
+        self.atrasados_tab.refresh()
+        self.gargalos_tab.refresh()
         self.atualizar_resumo()
         self.aplicar_ordenacao_tabelas()
-        self.atualizar_barra_status_sistema()
 
     def atualizar_resumo(self):
         if not self.state.tem_dados():
@@ -1658,13 +1321,7 @@ class MainWindow:
         self.state.bloquear_linha(id_linha, "")
         self.invalidar_cache()
         self.refresh_all()
-        linha = self.state.pegar_linha_por_id(id_linha)
-        self.salvar_estado_atual(
-            "Bloqueio aplicado",
-            "Item selecionado bloqueado para faturamento.",
-            pedido=str(linha["Pedido Texto"]) if linha is not None else "",
-            item=str(linha["Item"]) if linha is not None else "",
-        )
+        self.salvar_estado_atual()
         self.set_status("Item selecionado bloqueado para faturamento.")
 
     def bloquear_pedido_selecionado(self):
@@ -1684,11 +1341,7 @@ class MainWindow:
         self.state.bloquear_pedido(pedido, "")
         self.invalidar_cache()
         self.refresh_all()
-        self.salvar_estado_atual(
-            "Bloqueio aplicado",
-            "Pedido bloqueado para faturamento.",
-            pedido=pedido,
-        )
+        self.salvar_estado_atual()
         self.set_status(f"Pedido {pedido} bloqueado para faturamento.")
 
     def bloquear_item_global(self):
@@ -1710,11 +1363,7 @@ class MainWindow:
 
         self.invalidar_cache()
         self.refresh_all()
-        self.salvar_estado_atual(
-            "Bloqueio aplicado",
-            "Item bloqueado na carteira inteira.",
-            item=codigo,
-        )
+        self.salvar_estado_atual()
         self.set_status(f"Item {codigo} bloqueado na carteira inteira.")
 
     def liberar_item_global(self):
@@ -1731,11 +1380,7 @@ class MainWindow:
 
         self.invalidar_cache()
         self.refresh_all()
-        self.salvar_estado_atual(
-            "Bloqueio removido",
-            "Item liberado na carteira inteira.",
-            item=codigo,
-        )
+        self.salvar_estado_atual()
         self.set_status(f"Item {codigo} liberado na carteira inteira.")
 
     def adicionar_pedido_selecionado_prog2(self):
@@ -1754,11 +1399,7 @@ class MainWindow:
 
         self.state.adicionar_pedido_prog2(pedido)
         self.refresh_all()
-        self.salvar_estado_atual(
-            "PROG 2",
-            "Pedido adicionado ao PROG 2.",
-            pedido=pedido,
-        )
+        self.salvar_estado_atual()
         self.set_status(f"Pedido {pedido} adicionado ao PROG 2.")
 
     def adicionar_pedidos_selecionados_prog2(self, pedidos):
@@ -1775,10 +1416,7 @@ class MainWindow:
                 adicionados += 1
 
         self.refresh_all()
-        self.salvar_estado_atual(
-            "PROG 2",
-            f"{adicionados} pedido(s) adicionados ao PROG 2.",
-        )
+        self.salvar_estado_atual()
         self.set_status(f"{adicionados} pedido(s) adicionados ao PROG 2.")
 
     def remover_pedido_selecionado_prog2(self):
@@ -1790,11 +1428,7 @@ class MainWindow:
 
         self.state.remover_pedido_prog2(pedido)
         self.refresh_all()
-        self.salvar_estado_atual(
-            "PROG 2",
-            "Pedido removido do PROG 2.",
-            pedido=pedido,
-        )
+        self.salvar_estado_atual()
         self.set_status(f"Pedido {pedido} removido do PROG 2.")
 
     def remover_pedidos_selecionados_prog2(self, pedidos):
@@ -1805,10 +1439,7 @@ class MainWindow:
             self.state.remover_pedido_prog2(pedido)
 
         self.refresh_all()
-        self.salvar_estado_atual(
-            "PROG 2",
-            f"{len(pedidos)} pedido(s) removidos do PROG 2.",
-        )
+        self.salvar_estado_atual()
         self.set_status(f"{len(pedidos)} pedido(s) removidos do PROG 2.")
 
     def limpar_prog2(self):
@@ -1822,10 +1453,7 @@ class MainWindow:
 
         self.state.limpar_prog2()
         self.refresh_all()
-        self.salvar_estado_atual(
-            "PROG 2",
-            "Todos os pedidos foram removidos do PROG 2.",
-        )
+        self.salvar_estado_atual()
         self.set_status("PROG 2 limpo.")
 
     def fechar_faturamento_prog2(self):
@@ -1860,10 +1488,7 @@ class MainWindow:
         self.faturamento_service.fechar_prog2(df_fechamento=df_fechamento)
         self.invalidar_cache()
         self.refresh_all()
-        self.salvar_estado_atual(
-            "Faturamento fechado",
-            f"{len(pedidos_prog2)} pedido(s) fechados. Valor liberado: {formatar_moeda(valor_liberado)}.",
-        )
+        self.salvar_estado_atual()
 
         self.set_status(f"Faturamento fechado: {len(pedidos_prog2)} pedido(s) marcados como faturados.")
 
@@ -1886,11 +1511,7 @@ class MainWindow:
         self.faturamento_service.remover_pedido_faturado(pedido)
         self.invalidar_cache()
         self.refresh_all()
-        self.salvar_estado_atual(
-            "Faturamento removido",
-            "Pedido removido da lista de faturados.",
-            pedido=pedido,
-        )
+        self.salvar_estado_atual()
 
         self.set_status(f"Pedido {pedido} removido da lista de faturados.")
 
@@ -2155,11 +1776,7 @@ class MainWindow:
 
             self.invalidar_cache()
             self.refresh_all()
-            self.salvar_estado_atual(
-                "Bloqueio removido",
-                "Pedido liberado.",
-                pedido=pedido,
-            )
+            self.salvar_estado_atual()
             self.set_status(f"Pedido {pedido} liberado.")
             return
 
@@ -2217,12 +1834,7 @@ class MainWindow:
 
         self.invalidar_cache()
         self.refresh_all()
-        self.salvar_estado_atual(
-            "Bloqueio removido",
-            "Seleção liberada.",
-            pedido=pedido_linha if "pedido_linha" in locals() else "",
-            item=item if "item" in locals() else "",
-        )
+        self.salvar_estado_atual()
         self.set_status("Seleção liberada.")
 
     def liberar_bloqueio_na_aba(self):
@@ -2280,12 +1892,7 @@ class MainWindow:
 
         self.invalidar_cache()
         self.refresh_all()
-        self.salvar_estado_atual(
-            "Bloqueio removido",
-            "Bloqueio removido pela aba Bloqueios.",
-            pedido=pedido,
-            item=item,
-        )
+        self.salvar_estado_atual()
         self.set_status("Bloqueio removido.")
 
     def limpar_todos_bloqueios(self):
@@ -2311,21 +1918,8 @@ class MainWindow:
         self.state.limpar_bloqueios()
         self.invalidar_cache()
         self.refresh_all()
-        self.salvar_estado_atual(
-            "Bloqueios limpos",
-            "Todos os bloqueios foram removidos.",
-        )
+        self.salvar_estado_atual()
         self.set_status("Todos os bloqueios foram removidos.")
-
-    def gerar_nome_exportacao(self, prefixo, extensao):
-        data = datetime.now().strftime("%Y-%m-%d")
-        prefixo = str(prefixo).strip().replace(" ", "_")
-        extensao = str(extensao).lstrip(".")
-        return f"{prefixo}_{data}.{extensao}"
-
-    def obter_pasta_exportacao(self):
-        caminho_inicial = getattr(self.config_manager, "export_dir", None)
-        return str(caminho_inicial) if caminho_inicial else None
 
     def exportar_excel(self):
         if not self.state.tem_dados():
@@ -2334,8 +1928,6 @@ class MainWindow:
 
         caminho = filedialog.asksaveasfilename(
             title="Salvar relatório Excel",
-            initialdir=self.obter_pasta_exportacao(),
-            initialfile=self.gerar_nome_exportacao("Relatorio_CarteiraManager", "xlsx"),
             defaultextension=".xlsx",
             filetypes=[("Arquivo Excel", "*.xlsx")]
         )
@@ -2351,7 +1943,7 @@ class MainWindow:
 
         except Exception as erro:
             self.registrar_erro("Erro ao exportar Excel completo", erro)
-            mostrar_erro_operacional("Erro ao exportar Excel", erro, "Não foi possível gerar o relatório completo.")
+            messagebox.showerror("Erro ao exportar Excel", str(erro))
 
     def exportar_faturados_dia(self):
         df_exportar = self.faturados_tab.get_export_df(incluir_total=True)
@@ -2360,10 +1952,14 @@ class MainWindow:
             messagebox.showwarning("Nenhum faturamento", "Não há faturamentos do dia para exportar.")
             return
 
+        data_arquivo = datetime.now().strftime("%Y%m%d")
+        caminho_inicial = getattr(self.config_manager, "export_dir", None)
+        initialdir = str(caminho_inicial) if caminho_inicial else None
+
         caminho = filedialog.asksaveasfilename(
             title="Exportar faturados do dia",
-            initialdir=self.obter_pasta_exportacao(),
-            initialfile=self.gerar_nome_exportacao("Faturados_Dia", "xlsx"),
+            initialdir=initialdir,
+            initialfile=f"faturados_dia_{data_arquivo}.xlsx",
             defaultextension=".xlsx",
             filetypes=[("Arquivo Excel", "*.xlsx")]
         )
@@ -2372,44 +1968,40 @@ class MainWindow:
             return
 
         try:
-            exportar_faturados_dia_excel(caminho, df_exportar)
+            exportar_dataframe_excel(caminho, df_exportar, "Faturados do Dia")
             messagebox.showinfo("Exportação concluída", f"Faturados do dia exportados com sucesso:\n{caminho}")
             self.set_status(f"Faturados do dia exportados: {caminho}")
 
         except Exception as erro:
             self.registrar_erro("Erro ao exportar faturados do dia", erro)
-            mostrar_erro_operacional("Erro ao exportar faturados do dia", erro, "Não foi possível gerar a planilha de faturados do dia.")
+            messagebox.showerror("Erro ao exportar faturados do dia", str(erro))
 
     def exportar_csv_atual(self):
-        aba_atual = self.abas.tab(self.abas.select(), "text")
-
-        if aba_atual != "Histórico" and not self.state.tem_dados():
+        if not self.state.tem_dados():
             messagebox.showwarning("Nenhum arquivo importado", "Importe um CSV antes de exportar.")
             return
 
+        aba_atual = self.abas.tab(self.abas.select(), "text")
 
         if aba_atual == "Pedidos":
             df_exportar = self.state.gerar_df_pedidos_ajustados()
         elif aba_atual == "PROG 2":
             df_exportar = self.state.gerar_df_prog2()
-        elif aba_atual == "Simulação Semanal":
-            df_exportar = self.simulacao_semanal_tab.get_current_df()
         elif aba_atual in ("Faturados", "Faturados Dia"):
             df_exportar = self.faturados_tab.get_export_df(incluir_total=True)
-        elif aba_atual == "Histórico":
-            df_exportar = self.historico_tab.get_current_df()
+        elif aba_atual == "Atrasados":
+            df_exportar = self.atrasados_tab.get_current_df()
+        elif aba_atual == "Bloqueios":
+            df_exportar = self.state.gerar_df_bloqueios()
         else:
-            df_exportar = None
+            df_exportar = self.consolidacoes_tab.get_current_df()
 
         if df_exportar is None:
             messagebox.showwarning("Nenhuma visualização", "Nenhum dado disponível para exportar.")
             return
 
-        nome_aba = str(aba_atual).replace(" ", "_")
         caminho = filedialog.asksaveasfilename(
             title="Salvar CSV atual",
-            initialdir=self.obter_pasta_exportacao(),
-            initialfile=self.gerar_nome_exportacao(nome_aba, "csv"),
             defaultextension=".csv",
             filetypes=[("Arquivo CSV", "*.csv")]
         )
@@ -2425,4 +2017,4 @@ class MainWindow:
 
         except Exception as erro:
             self.registrar_erro("Erro ao exportar CSV", erro)
-            mostrar_erro_operacional("Erro ao exportar CSV", erro, "Não foi possível exportar a aba atual.")
+            messagebox.showerror("Erro ao exportar CSV", str(erro))

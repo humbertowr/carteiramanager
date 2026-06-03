@@ -1,7 +1,8 @@
 from datetime import datetime
 
 import pandas as pd
-from openpyxl.styles import Border, Font, Side
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
 
 from core.carteira_processor import obter_consolidacao
 from core.formatters import formatar_numero
@@ -176,6 +177,243 @@ def exportar_dataframe_excel(caminho, df, sheet_name="Dados"):
 
             worksheet.column_dimensions[letra_coluna].width = min(tamanho_maximo + 2, 50)
 
+
+def _valor_numerico(valor):
+    try:
+        if valor in (None, ""):
+            return 0.0
+        return float(valor)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _limpar_texto_exportacao(valor):
+    if valor is None or pd.isna(valor):
+        return ""
+    return str(valor).strip()
+
+
+def _preparar_faturados_dia_comercial(df):
+    if df is None or df.empty:
+        raise ValueError("Nenhum dado para exportar.")
+
+    dados = df.copy()
+
+    if "Pedido" in dados.columns:
+        dados = dados[~dados["Pedido"].astype(str).str.upper().str.startswith("TOTAL")].copy()
+
+    colunas_origem = {
+        "Pedido": "Pedido",
+        "Cliente": "Cliente",
+        "Item": "Item",
+        "Descrição Item": "Descrição do Item",
+        "Qtde": "Qtd. Faturada",
+        "Valor Total Faturamento": "Valor Faturado",
+        "Valor Saldo Pedido": "Saldo do Pedido",
+        "Previsão de Embarque": "Previsão de Embarque",
+        "OBS": "OBS",
+    }
+
+    for coluna in colunas_origem:
+        if coluna not in dados.columns:
+            dados[coluna] = 0 if coluna in ("Qtde", "Valor Total Faturamento", "Valor Saldo Pedido") else ""
+
+    dados["Qtde"] = pd.to_numeric(dados["Qtde"], errors="coerce").fillna(0)
+    dados["Valor Total Faturamento"] = pd.to_numeric(dados["Valor Total Faturamento"], errors="coerce").fillna(0)
+    dados["Valor Saldo Pedido"] = pd.to_numeric(dados["Valor Saldo Pedido"], errors="coerce").fillna(0)
+
+    dados.sort_values(["Pedido", "Item"], inplace=True, kind="stable")
+
+    exportar = pd.DataFrame({destino: dados[origem] for origem, destino in colunas_origem.items()})
+    exportar["Status"] = dados["Valor Saldo Pedido"].apply(lambda valor: "Parcial" if _valor_numerico(valor) > 0 else "Total")
+
+    ordem = [
+        "Pedido",
+        "Cliente",
+        "Item",
+        "Descrição do Item",
+        "Qtd. Faturada",
+        "Valor Faturado",
+        "Saldo do Pedido",
+        "Status",
+        "Previsão de Embarque",
+        "OBS",
+    ]
+    exportar = exportar[ordem]
+    exportar["Saldo do Pedido"] = exportar["Saldo do Pedido"].astype(object)
+
+    # Evita interpretação incorreta do saldo quando o pedido tem mais de um item.
+    # O valor fica visível apenas na primeira linha do pedido e o total usa pedido único.
+    pedidos_vistos = set()
+    for indice, linha in exportar.iterrows():
+        pedido = _limpar_texto_exportacao(linha.get("Pedido", ""))
+        if not pedido:
+            continue
+        if pedido in pedidos_vistos:
+            exportar.at[indice, "Saldo do Pedido"] = ""
+        else:
+            pedidos_vistos.add(pedido)
+
+    resumo = {
+        "pedidos": dados["Pedido"].astype(str).nunique(),
+        "itens": len(dados),
+        "quantidade": float(dados["Qtde"].sum()),
+        "valor_faturado": float(dados["Valor Total Faturamento"].sum()),
+        "saldo_pedido": float(
+            dados.drop_duplicates("Pedido")["Valor Saldo Pedido"].sum()
+            if "Pedido" in dados.columns else dados["Valor Saldo Pedido"].sum()
+        ),
+    }
+
+    return exportar, resumo
+
+
+def exportar_faturados_dia_excel(caminho, df):
+    """Exporta os faturados do dia em layout comercial e gerencial."""
+    df_exportar, resumo = _preparar_faturados_dia_comercial(df)
+
+    with pd.ExcelWriter(caminho, engine="openpyxl") as writer:
+        # Escreve a tabela abaixo do cabeçalho/resumo.
+        linha_inicio = 7
+        df_exportar.to_excel(
+            writer,
+            sheet_name="Faturados do Dia",
+            index=False,
+            startrow=linha_inicio - 1,
+        )
+
+        worksheet = writer.sheets["Faturados do Dia"]
+
+        borda_fina = Border(
+            left=Side(style="thin", color="D0D7DE"),
+            right=Side(style="thin", color="D0D7DE"),
+            top=Side(style="thin", color="D0D7DE"),
+            bottom=Side(style="thin", color="D0D7DE"),
+        )
+        borda_titulo = Border(bottom=Side(style="medium", color="1F2937"))
+        fill_titulo = PatternFill("solid", fgColor="F8FAFC")
+        fill_cabecalho = PatternFill("solid", fgColor="E5E7EB")
+        fill_total = PatternFill("solid", fgColor="F3F4F6")
+        fonte_titulo = Font(bold=True, size=14, color="111827")
+        fonte_negrito = Font(bold=True, color="111827")
+        alinhamento_centro = Alignment(horizontal="center", vertical="center")
+        alinhamento_texto = Alignment(horizontal="left", vertical="center")
+        alinhamento_numero = Alignment(horizontal="right", vertical="center")
+        formato_moeda = '"R$" #,##0.00'
+        formato_numero = '#,##0.00'
+
+        ultima_coluna = df_exportar.shape[1]
+        ultima_linha_tabela = linha_inicio + len(df_exportar)
+        linha_total = ultima_linha_tabela + 1
+
+        # Título e resumo.
+        worksheet.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ultima_coluna)
+        titulo = worksheet.cell(row=1, column=1, value="FATURADOS DO DIA")
+        titulo.font = fonte_titulo
+        titulo.alignment = alinhamento_texto
+        titulo.fill = fill_titulo
+        titulo.border = borda_titulo
+
+        resumo_linhas = [
+            ("Gerado em", datetime.now().strftime("%d/%m/%Y %H:%M")),
+            ("Valor faturado", resumo["valor_faturado"]),
+            ("Saldo não faturado", resumo["saldo_pedido"]),
+        ]
+
+        for deslocamento, (label, valor) in enumerate(resumo_linhas, start=3):
+            worksheet.cell(row=deslocamento, column=1, value=label).font = fonte_negrito
+            worksheet.cell(row=deslocamento, column=2, value=valor)
+
+            for coluna in (1, 2):
+                cell = worksheet.cell(row=deslocamento, column=coluna)
+                cell.border = borda_fina
+                cell.alignment = alinhamento_texto if coluna == 1 else alinhamento_numero
+
+        for celula in ("B4", "B5"):
+            worksheet[celula].number_format = formato_moeda
+
+        # Cabeçalho da tabela.
+        for cell in worksheet[linha_inicio]:
+            cell.font = fonte_negrito
+            cell.fill = fill_cabecalho
+            cell.border = borda_fina
+            cell.alignment = alinhamento_centro
+
+        colunas = {cell.value: cell.column for cell in worksheet[linha_inicio]}
+        colunas_moeda = {
+            colunas.get("Valor Faturado"),
+            colunas.get("Saldo do Pedido"),
+        }
+        colunas_moeda.discard(None)
+        coluna_quantidade = colunas.get("Qtd. Faturada")
+
+        # Corpo da tabela.
+        for row in worksheet.iter_rows(
+            min_row=linha_inicio + 1,
+            max_row=ultima_linha_tabela,
+            max_col=ultima_coluna,
+        ):
+            linha_tem_conteudo = any(cell.value not in (None, "") for cell in row)
+            if not linha_tem_conteudo:
+                continue
+
+            for cell in row:
+                cell.border = borda_fina
+                cell.alignment = alinhamento_texto
+
+                if cell.column in colunas_moeda and cell.value not in (None, ""):
+                    cell.number_format = formato_moeda
+                    cell.alignment = alinhamento_numero
+                elif cell.column == coluna_quantidade and cell.value not in (None, ""):
+                    cell.number_format = formato_numero
+                    cell.alignment = alinhamento_numero
+
+        # Total do dia.
+        total = {coluna: "" for coluna in df_exportar.columns}
+        total["Pedido"] = "TOTAL DO DIA"
+        total["Qtd. Faturada"] = resumo["quantidade"]
+        total["Valor Faturado"] = resumo["valor_faturado"]
+        total["Saldo do Pedido"] = resumo["saldo_pedido"]
+
+        for coluna_idx, coluna_nome in enumerate(df_exportar.columns, start=1):
+            cell = worksheet.cell(row=linha_total, column=coluna_idx, value=total[coluna_nome])
+            cell.font = fonte_negrito
+            cell.fill = fill_total
+            cell.border = borda_fina
+            cell.alignment = alinhamento_texto
+
+            if coluna_nome in ("Valor Faturado", "Saldo do Pedido"):
+                cell.number_format = formato_moeda
+                cell.alignment = alinhamento_numero
+            elif coluna_nome == "Qtd. Faturada":
+                cell.number_format = formato_numero
+                cell.alignment = alinhamento_numero
+
+        # Filtros, congelamento e largura.
+        ultima_letra_coluna = get_column_letter(ultima_coluna)
+        worksheet.auto_filter.ref = f"A{linha_inicio}:{ultima_letra_coluna}{linha_total}"
+        worksheet.freeze_panes = f"A{linha_inicio + 1}"
+
+        larguras = {
+            "A": 14,  # Pedido
+            "B": 38,  # Cliente
+            "C": 14,  # Item
+            "D": 46,  # Descrição
+            "E": 14,  # Qtde
+            "F": 18,  # Valor faturado
+            "G": 18,  # Saldo
+            "H": 12,  # Status
+            "I": 22,  # Previsão
+            "J": 34,  # OBS
+        }
+
+        for letra, largura in larguras.items():
+            worksheet.column_dimensions[letra].width = largura
+
+        for row in worksheet.iter_rows(min_row=1, max_row=linha_total, max_col=ultima_coluna):
+            for cell in row:
+                if cell.value not in (None, ""):
+                    cell.alignment = cell.alignment.copy(wrap_text=True)
 
 def preparar_dataframe_pdf(df, titulo):
     df_pdf = preparar_dataframe_exportacao(df, titulo)
@@ -431,3 +669,302 @@ def exportar_dataframe_pdf(caminho, df, titulo="Relatório"):
         onFirstPage=lambda canvas, doc: desenhar_rodape_pdf(canvas, doc, texto_rodape),
         onLaterPages=lambda canvas, doc: desenhar_rodape_pdf(canvas, doc, texto_rodape),
     )
+
+def exportar_simulacao_faturamento_excel(caminho, resultado):
+    """Exporta a simulação semanal com uma aba de visão geral e uma aba por dia."""
+    if not resultado or not resultado.get("dias"):
+        raise ValueError("Nenhuma simulação disponível para exportar.")
+
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws_geral = wb.active
+    ws_geral.title = "Visão Geral"
+
+    estilos = _criar_estilos_simulacao()
+    _montar_aba_visao_geral_simulacao(ws_geral, resultado, estilos)
+
+    nomes_usados = {ws_geral.title}
+    for dia in resultado.get("dias", []):
+        nome_aba = _nome_aba_dia_simulacao(dia.get("data"), nomes_usados)
+        nomes_usados.add(nome_aba)
+        ws_dia = wb.create_sheet(nome_aba)
+        _montar_aba_dia_simulacao(ws_dia, dia, estilos)
+
+    wb.save(caminho)
+
+
+def _criar_estilos_simulacao():
+    return {
+        "border": Border(
+            left=Side(style="thin", color="D0D7DE"),
+            right=Side(style="thin", color="D0D7DE"),
+            top=Side(style="thin", color="D0D7DE"),
+            bottom=Side(style="thin", color="D0D7DE"),
+        ),
+        "fill_title": PatternFill("solid", fgColor="F8FAFC"),
+        "fill_header": PatternFill("solid", fgColor="E5E7EB"),
+        "fill_section": PatternFill("solid", fgColor="F3F4F6"),
+        "fill_total": PatternFill("solid", fgColor="EEF2FF"),
+        "font_title": Font(bold=True, size=14, color="111827"),
+        "font_header": Font(bold=True, color="111827"),
+        "font_muted": Font(color="4B5563"),
+        "align_left": Alignment(horizontal="left", vertical="center"),
+        "align_center": Alignment(horizontal="center", vertical="center"),
+        "align_right": Alignment(horizontal="right", vertical="center"),
+        "currency": '"R$" #,##0.00',
+        "number": '#,##0.00',
+        "percent": '0.00%',
+    }
+
+
+def _montar_aba_visao_geral_simulacao(ws, resultado, estilos):
+    dias = resultado.get("dias", [])
+    periodo = f"{resultado['data_inicio'].strftime('%d/%m/%Y')} a {resultado['data_fim'].strftime('%d/%m/%Y')}"
+    total_bloqueado = sum(
+        float(pedido.get("valor_bloqueado", 0) or 0)
+        for dia in dias
+        for pedido in dia.get("pedidos", [])
+    )
+    total_itens = sum(
+        len(pedido.get("itens", []))
+        for dia in dias
+        for pedido in dia.get("pedidos", [])
+    )
+
+    ws.merge_cells("A1:I1")
+    ws["A1"] = "SIMULAÇÃO SEMANAL DE FATURAMENTO"
+    ws["A1"].font = estilos["font_title"]
+    ws["A1"].fill = estilos["fill_title"]
+    ws["A1"].alignment = estilos["align_left"]
+
+    resumo = [
+        ("Período", periodo, "Dias", resultado.get("qtd_dias", len(dias))),
+        ("Meta diária", resultado.get("meta_diaria", 0), "Meta total", resultado.get("meta_total", 0)),
+        ("Valor estimado", resultado.get("valor_estimado_total", 0), "Diferença", resultado.get("diferenca_total", 0)),
+        ("Pedidos", resultado.get("qtd_pedidos", 0), "Itens", total_itens),
+        ("Saldo bloqueado", total_bloqueado, "Saldo elegível restante", resultado.get("valor_restante", 0)),
+    ]
+
+    for linha, (label_a, valor_b, label_d, valor_e) in enumerate(resumo, start=3):
+        ws.cell(row=linha, column=1, value=label_a).font = estilos["font_header"]
+        ws.cell(row=linha, column=2, value=valor_b)
+        ws.cell(row=linha, column=4, value=label_d).font = estilos["font_header"]
+        ws.cell(row=linha, column=5, value=valor_e)
+        for coluna in (1, 2, 4, 5):
+            cell = ws.cell(row=linha, column=coluna)
+            cell.border = estilos["border"]
+            cell.alignment = estilos["align_left"] if coluna in (1, 4) else estilos["align_right"]
+            if linha in (4, 5, 7) and coluna in (2, 5):
+                cell.number_format = estilos["currency"]
+
+    linha_inicio = 10
+    cabecalhos = [
+        "Data",
+        "Meta",
+        "Valor Estimado",
+        "Diferença",
+        "% da Meta",
+        "Pedidos",
+        "Itens",
+        "Saldo Bloqueado",
+        "Status",
+    ]
+    _escrever_cabecalho(ws, linha_inicio, cabecalhos, estilos)
+
+    for offset, dia in enumerate(dias, start=1):
+        linha = linha_inicio + offset
+        meta = float(dia.get("meta", 0) or 0)
+        valor = float(dia.get("valor_estimado", 0) or 0)
+        itens = sum(len(pedido.get("itens", [])) for pedido in dia.get("pedidos", []))
+        saldo_bloqueado = sum(float(pedido.get("valor_bloqueado", 0) or 0) for pedido in dia.get("pedidos", []))
+        valores = [
+            dia.get("data").strftime("%d/%m/%Y") if dia.get("data") else "",
+            meta,
+            valor,
+            float(dia.get("diferenca", 0) or 0),
+            (valor / meta) if meta else 0,
+            len(dia.get("pedidos", [])),
+            itens,
+            saldo_bloqueado,
+            dia.get("status", ""),
+        ]
+        for coluna, valor_cell in enumerate(valores, start=1):
+            cell = ws.cell(row=linha, column=coluna, value=valor_cell)
+            cell.border = estilos["border"]
+            cell.alignment = estilos["align_center"] if coluna in (1, 6, 7, 9) else estilos["align_right"]
+            if coluna in (2, 3, 4, 8):
+                cell.number_format = estilos["currency"]
+            elif coluna == 5:
+                cell.number_format = estilos["percent"]
+
+    linha_total = linha_inicio + len(dias) + 1
+    total_meta = resultado.get("meta_total", 0)
+    total_estimado = resultado.get("valor_estimado_total", 0)
+    total_diff = resultado.get("diferenca_total", 0)
+    total_pedidos = resultado.get("qtd_pedidos", 0)
+    total_percentual = (float(total_estimado or 0) / float(total_meta or 1)) if total_meta else 0
+    totais = ["TOTAL", total_meta, total_estimado, total_diff, total_percentual, total_pedidos, total_itens, total_bloqueado, ""]
+    _escrever_linha_total(ws, linha_total, totais, estilos, colunas_moeda={2, 3, 4, 8}, colunas_percentual={5})
+
+    ws.auto_filter.ref = f"A{linha_inicio}:I{linha_total}"
+    ws.freeze_panes = f"A{linha_inicio + 1}"
+    _ajustar_layout_planilha(ws, {
+        "A": 13,
+        "B": 15,
+        "C": 18,
+        "D": 15,
+        "E": 12,
+        "F": 10,
+        "G": 10,
+        "H": 18,
+        "I": 22,
+    })
+
+
+def _montar_aba_dia_simulacao(ws, dia, estilos):
+    data_texto = dia.get("data").strftime("%d/%m/%Y") if dia.get("data") else ""
+    pedidos = dia.get("pedidos", [])
+    saldo_bloqueado_total = sum(float(pedido.get("valor_bloqueado", 0) or 0) for pedido in pedidos)
+
+    ws.merge_cells("A1:G1")
+    ws["A1"] = f"SIMULAÇÃO DE FATURAMENTO - {data_texto}"
+    ws["A1"].font = estilos["font_title"]
+    ws["A1"].fill = estilos["fill_title"]
+    ws["A1"].alignment = estilos["align_left"]
+
+    linha_inicio = 3
+    cabecalhos = [
+        "Pedido",
+        "Item",
+        "Descrição do Item",
+        "Cliente",
+        "QTD",
+        "Valor Faturável",
+        "Saldo Bloqueado",
+    ]
+    _escrever_cabecalho(ws, linha_inicio, cabecalhos, estilos)
+
+    linha_atual = linha_inicio + 1
+    if not pedidos:
+        ws.cell(row=linha_atual, column=1, value="Nenhum pedido selecionado para este dia.")
+        ws.merge_cells(start_row=linha_atual, start_column=1, end_row=linha_atual, end_column=len(cabecalhos))
+        ws.cell(row=linha_atual, column=1).font = estilos["font_muted"]
+        ws.cell(row=linha_atual, column=1).alignment = estilos["align_left"]
+        for col in range(1, len(cabecalhos) + 1):
+            ws.cell(row=linha_atual, column=col).border = estilos["border"]
+        linha_atual += 1
+    else:
+        for pedido in pedidos:
+            itens = pedido.get("itens", [])
+            if not itens:
+                valores = [
+                    pedido.get("pedido", ""),
+                    "",
+                    "Sem itens detalhados",
+                    pedido.get("cliente_original") or pedido.get("cliente", ""),
+                    pedido.get("quantidade", ""),
+                    pedido.get("valor_liberado", 0),
+                    pedido.get("valor_bloqueado", 0),
+                ]
+                _escrever_linha_dia_simulacao(ws, linha_atual, valores, estilos, linha_pedido=True)
+                linha_atual += 1
+                continue
+
+            primeiro_item = True
+            for item in itens:
+                valores = [
+                    pedido.get("pedido", "") if primeiro_item else "",
+                    item.get("item", ""),
+                    item.get("descricao", ""),
+                    pedido.get("cliente_original") or pedido.get("cliente", "") if primeiro_item else "",
+                    item.get("quantidade", ""),
+                    item.get("valor", ""),
+                    pedido.get("valor_bloqueado", 0) if primeiro_item else "",
+                ]
+                _escrever_linha_dia_simulacao(ws, linha_atual, valores, estilos, linha_pedido=primeiro_item)
+                linha_atual += 1
+                primeiro_item = False
+
+    linha_total = linha_atual
+    totais = ["TOTAL", "", "", "", "", dia.get("valor_estimado", 0), saldo_bloqueado_total]
+    _escrever_linha_total(ws, linha_total, totais, estilos, colunas_moeda={6, 7})
+
+    ws.auto_filter.ref = f"A{linha_inicio}:G{linha_total}"
+    ws.freeze_panes = f"A{linha_inicio + 1}"
+    _ajustar_layout_planilha(ws, {
+        "A": 15,
+        "B": 16,
+        "C": 48,
+        "D": 42,
+        "E": 12,
+        "F": 18,
+        "G": 18,
+    })
+
+
+def _escrever_cabecalho(ws, linha, cabecalhos, estilos):
+    for coluna, titulo in enumerate(cabecalhos, start=1):
+        cell = ws.cell(row=linha, column=coluna, value=titulo)
+        cell.font = estilos["font_header"]
+        cell.fill = estilos["fill_header"]
+        cell.border = estilos["border"]
+        cell.alignment = estilos["align_center"]
+
+
+def _escrever_linha_dia_simulacao(ws, linha, valores, estilos, linha_pedido=False):
+    for coluna, valor in enumerate(valores, start=1):
+        cell = ws.cell(row=linha, column=coluna, value=valor)
+        cell.border = estilos["border"]
+        cell.alignment = estilos["align_left"]
+        if linha_pedido:
+            cell.fill = estilos["fill_section"]
+            if coluna in (1, 4):
+                cell.font = estilos["font_header"]
+        if coluna in (5, 6, 7) and valor not in (None, ""):
+            cell.alignment = estilos["align_right"]
+            cell.number_format = estilos["number"] if coluna == 5 else estilos["currency"]
+
+
+def _escrever_linha_total(ws, linha, valores, estilos, colunas_moeda=None, colunas_percentual=None):
+    colunas_moeda = colunas_moeda or set()
+    colunas_percentual = colunas_percentual or set()
+    for coluna, valor in enumerate(valores, start=1):
+        cell = ws.cell(row=linha, column=coluna, value=valor)
+        cell.font = estilos["font_header"]
+        cell.fill = estilos["fill_total"]
+        cell.border = estilos["border"]
+        cell.alignment = estilos["align_right"] if coluna != 1 else estilos["align_left"]
+        if coluna in colunas_moeda and valor not in (None, ""):
+            cell.number_format = estilos["currency"]
+        elif coluna in colunas_percentual and valor not in (None, ""):
+            cell.number_format = estilos["percent"]
+
+
+def _ajustar_layout_planilha(ws, larguras):
+    for letra, largura in larguras.items():
+        ws.column_dimensions[letra].width = largura
+
+    for row in ws.iter_rows():
+        for cell in row:
+            if cell.value not in (None, ""):
+                cell.alignment = cell.alignment.copy(wrap_text=True)
+
+    for row in ws.iter_rows():
+        ws.row_dimensions[row[0].row].height = 22
+    ws.row_dimensions[1].height = 26
+
+
+def _nome_aba_dia_simulacao(data_dia, nomes_usados):
+    if data_dia:
+        nome_base = data_dia.strftime("%d-%m")
+    else:
+        nome_base = "Dia"
+
+    nome = nome_base[:31]
+    contador = 2
+    while nome in nomes_usados:
+        sufixo = f"_{contador}"
+        nome = f"{nome_base[:31 - len(sufixo)]}{sufixo}"
+        contador += 1
+    return nome

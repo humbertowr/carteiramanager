@@ -24,7 +24,7 @@ class ConsolidacoesTab:
         self.criar_interface()
 
     def criar_interface(self):
-        container = ttk.Frame(self.parent, padding=(10, 8))
+        container = ttk.Frame(self.parent, padding=(7, 5))
         container.pack(fill="both", expand=True)
 
         self.criar_topo(container)
@@ -34,10 +34,10 @@ class ConsolidacoesTab:
         frame_topo = ttk.LabelFrame(
             parent,
             text="Consolidações",
-            padding=(8, 6),
+            padding=(7, 5),
             style="Section.TLabelframe"
         )
-        frame_topo.pack(fill="x", pady=(0, 6))
+        frame_topo.pack(fill="x", pady=(0, 5))
 
         ttk.Label(frame_topo, text="Tipo", style="Hint.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 5))
 
@@ -82,7 +82,7 @@ class ConsolidacoesTab:
         frame_tabela = ttk.LabelFrame(
             parent,
             text="Resultado consolidado",
-            padding=(8, 6),
+            padding=(7, 5),
             style="Section.TLabelframe"
         )
         frame_tabela.pack(fill="both", expand=True)

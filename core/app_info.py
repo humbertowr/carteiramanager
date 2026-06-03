@@ -1,0 +1,5 @@
+APP_NAME = "Carteira Manager"
+APP_VERSION = "1.0.0"
+APP_BUILD = "20260603"
+APP_ENVIRONMENT = "Produção"
+VERSION_FILE_NAME = "version.json"

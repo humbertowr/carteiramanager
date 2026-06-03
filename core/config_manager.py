@@ -6,6 +6,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from core.app_info import APP_VERSION, APP_BUILD
+
 
 class ConfigManager:
     """Gerencia configuração local ou compartilhada do Carteira Manager.
@@ -121,6 +123,8 @@ class ConfigManager:
             },
             "_sistema": {
                 "modo_compartilhado": bool(getattr(self, "modo_compartilhado", False)),
+                "app_version": APP_VERSION,
+                "app_build": APP_BUILD,
                 "criado_em": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "atualizado_em": "",
                 "atualizado_por": "",
@@ -187,6 +191,8 @@ class ConfigManager:
                 config["settings"][chave] = valor
 
         config["_sistema"]["modo_compartilhado"] = bool(self.modo_compartilhado)
+        config["_sistema"]["app_version"] = config["_sistema"].get("app_version") or APP_VERSION
+        config["_sistema"]["app_build"] = config["_sistema"].get("app_build") or APP_BUILD
 
         return config
 
@@ -289,8 +295,11 @@ class ConfigManager:
 
     def salvar(self, config):
         config = self.normalizar_config(config)
-        config.setdefault("_sistema", {})["atualizado_em"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        config.setdefault("_sistema", {})["atualizado_por"] = self.usuario
+        sistema = config.setdefault("_sistema", {})
+        sistema["atualizado_em"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        sistema["atualizado_por"] = self.usuario
+        sistema["app_version"] = APP_VERSION
+        sistema["app_build"] = APP_BUILD
 
         self._adquirir_lock()
         try:

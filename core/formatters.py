@@ -66,3 +66,27 @@ def formatar_numero(valor):
         return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     except Exception:
         return "0,00"
+
+
+def formatar_data(valor):
+    try:
+        if valor is None or pd.isna(valor):
+            return ""
+        data = pd.to_datetime(valor, dayfirst=True, errors="coerce")
+        if pd.isna(data):
+            return str(valor)
+        return data.strftime("%d/%m/%Y")
+    except Exception:
+        return str(valor or "")
+
+
+def formatar_data_hora(valor):
+    try:
+        if valor is None or pd.isna(valor):
+            return ""
+        data = pd.to_datetime(valor, dayfirst=True, errors="coerce")
+        if pd.isna(data):
+            return str(valor)
+        return data.strftime("%d/%m/%Y %H:%M")
+    except Exception:
+        return str(valor or "")

@@ -7,7 +7,7 @@ import pandas as pd
 from core.formatters import formatar_moeda, formatar_numero
 from ui.styles import configurar_tags_tabela
 from ui.sortable_tree import aplicar_ordenacao_treeview
-from ui.ux_helpers import aplicar_menu_generico_tabela
+from ui.ux_helpers import aplicar_estado_vazio_treeview, aplicar_menu_generico_tabela, criar_cabecalho_aba
 
 
 class FaturadosTab:
@@ -24,9 +24,10 @@ class FaturadosTab:
         self.criar_interface()
 
     def criar_interface(self):
-        container = ttk.Frame(self.parent, padding=(10, 8))
+        container = ttk.Frame(self.parent, padding=(8, 6))
         container.pack(fill="both", expand=True)
 
+        criar_cabecalho_aba(container, "Faturados Dia", "Pedidos fechados no dia atual e exportação para envio comercial.")
         self.criar_resumo(container)
         self.criar_acoes(container)
         self.criar_tabela(container)
@@ -35,10 +36,10 @@ class FaturadosTab:
         frame = ttk.LabelFrame(
             parent,
             text="Faturados do dia",
-            padding=(8, 6),
+            padding=(7, 5),
             style="Section.TLabelframe",
         )
-        frame.pack(fill="x", pady=(0, 6))
+        frame.pack(fill="x", pady=(0, 5))
 
         self.label_data = ttk.Label(frame, text=f"Data: {self.data_hoje()}", style="SummaryValue.TLabel")
         self.label_data.grid(row=0, column=0, sticky="w", padx=(0, 24))
@@ -61,10 +62,10 @@ class FaturadosTab:
         frame = ttk.LabelFrame(
             parent,
             text="Ações",
-            padding=(8, 6),
+            padding=(7, 5),
             style="Section.TLabelframe",
         )
-        frame.pack(fill="x", pady=(0, 6))
+        frame.pack(fill="x", pady=(0, 5))
 
         ttk.Label(frame, text="Buscar", style="Hint.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 6))
 
@@ -98,13 +99,13 @@ class FaturadosTab:
         frame = ttk.LabelFrame(
             parent,
             text="Pedidos e itens faturados hoje",
-            padding=(8, 6),
+            padding=(7, 5),
             style="Section.TLabelframe",
         )
         frame.pack(fill="both", expand=True)
 
         barra = ttk.Frame(frame)
-        barra.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
+        barra.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 5))
 
         ttk.Label(
             barra,
@@ -422,6 +423,7 @@ class FaturadosTab:
         if df_itens.empty:
             self._df_faturados = pd.DataFrame()
             self._df_itens_dia = pd.DataFrame()
+            aplicar_estado_vazio_treeview(self.tabela, "Nenhum faturamento registrado hoje.")
             self.atualizar_resumo(0, 0, 0, 0)
             return
 

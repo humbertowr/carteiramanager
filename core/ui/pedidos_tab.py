@@ -4,15 +4,7 @@ from tkinter import ttk
 from core.formatters import converter_valor_digitado, formatar_moeda, formatar_numero
 from ui.styles import CORES, FONTE, configurar_tags_tabela
 from ui.sortable_tree import aplicar_ordenacao_treeview
-from ui.ux_helpers import (
-    abrir_janela_detalhes,
-    aplicar_estado_vazio_treeview,
-    aplicar_tooltip,
-    copiar_para_clipboard,
-    criar_cabecalho_aba,
-    criar_menu_contexto,
-    obter_texto_linha_treeview,
-)
+from ui.ux_helpers import abrir_janela_detalhes, copiar_para_clipboard, criar_menu_contexto, obter_texto_linha_treeview
 
 
 class PedidosTab:
@@ -44,7 +36,6 @@ class PedidosTab:
         container = ttk.Frame(self.parent, padding=(8, 6))
         container.pack(fill="both", expand=True)
 
-        criar_cabecalho_aba(container, "Pedidos", "Carteira aberta com filtros, bloqueios e seleção para PROG 2.")
         self.criar_painel_acoes(container)
         self.criar_tabela(container)
 
@@ -98,7 +89,7 @@ class PedidosTab:
 
         ttk.Button(
             linha_principal,
-            text="Limpar",
+            text="Limpar filtros",
             command=self.limpar_filtros,
             style="Subtle.TButton",
         ).grid(row=0, column=8, sticky="w", padx=(0, 8))
@@ -112,7 +103,7 @@ class PedidosTab:
 
         ttk.Button(
             linha_principal,
-            text="Adicionar",
+            text="Adicionar ao PROG 2",
             command=self.adicionar_pedidos_marcados_prog2,
             style="Primary.TButton",
         ).grid(row=0, column=10, sticky="e", padx=(0, 6))
@@ -137,13 +128,13 @@ class PedidosTab:
 
         ttk.Label(bloco_item, text="Item", style="Hint.TLabel").pack(side="left", padx=(0, 5))
         ttk.Entry(bloco_item, textvariable=self.item_global_var, width=13).pack(side="left", padx=(0, 4))
-        ttk.Button(bloco_item, text="Bloq.", command=self.controller.bloquear_item_global, style="Danger.TButton").pack(side="left", padx=(0, 4))
-        ttk.Button(bloco_item, text="Lib.", command=self.controller.liberar_item_global, style="Success.TButton").pack(side="left")
+        ttk.Button(bloco_item, text="Bloquear", command=self.controller.bloquear_item_global, style="Danger.TButton").pack(side="left", padx=(0, 4))
+        ttk.Button(bloco_item, text="Liberar", command=self.controller.liberar_item_global, style="Success.TButton").pack(side="left")
 
         linha_secundaria.columnconfigure(0, weight=1)
 
     def criar_menu_mais_acoes(self, parent):
-        menu_button = ttk.Menubutton(parent, text="Ações ▾")
+        menu_button = ttk.Menubutton(parent, text="Mais ações ▾")
         menu = tk.Menu(
             menu_button,
             tearoff=0,
@@ -620,7 +611,6 @@ class PedidosTab:
         self.atualizar_cabecalho_valor_liberado()
 
         if not self.state.tem_dados():
-            aplicar_estado_vazio_treeview(self.tabela, "Nenhuma carteira carregada. Importe um CSV para iniciar.")
             self.atualizar_label_marcados()
             return
 
@@ -771,9 +761,6 @@ class PedidosTab:
             pedido for pedido in self.pedidos_marcados
             if pedido in pedidos_visiveis
         }
-
-        if pedidos_exibidos == 0:
-            aplicar_estado_vazio_treeview(self.tabela, "Nenhum pedido encontrado com os filtros atuais.")
 
         self.atualizar_label_marcados()
         self.aplicar_ordenacao()

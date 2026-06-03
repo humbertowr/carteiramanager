@@ -23,7 +23,7 @@ class AtrasadosTab:
         self.criar_interface()
 
     def criar_interface(self):
-        container = ttk.Frame(self.parent, padding=(10, 8))
+        container = ttk.Frame(self.parent, padding=(7, 5))
         container.pack(fill="both", expand=True)
 
         self.criar_resumo(container)
@@ -34,10 +34,10 @@ class AtrasadosTab:
         frame = ttk.LabelFrame(
             parent,
             text="Resumo de atrasados",
-            padding=(8, 6),
+            padding=(7, 5),
             style="Section.TLabelframe"
         )
-        frame.pack(fill="x", pady=(0, 6))
+        frame.pack(fill="x", pady=(0, 5))
 
         self.label_pedidos = ttk.Label(frame, text="Pedidos atrasados: 0", style="SummaryValue.TLabel")
         self.label_pedidos.grid(row=0, column=0, sticky="w", padx=(0, 24))
@@ -60,10 +60,10 @@ class AtrasadosTab:
         frame = ttk.LabelFrame(
             parent,
             text="Filtros de atrasados",
-            padding=(8, 6),
+            padding=(7, 5),
             style="Section.TLabelframe"
         )
-        frame.pack(fill="x", pady=(0, 6))
+        frame.pack(fill="x", pady=(0, 5))
 
         ttk.Label(frame, text="Buscar", style="Hint.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 5))
 
@@ -83,13 +83,13 @@ class AtrasadosTab:
         frame = ttk.LabelFrame(
             parent,
             text="Pedidos em atraso",
-            padding=(8, 6),
+            padding=(7, 5),
             style="Section.TLabelframe"
         )
         frame.pack(fill="both", expand=True)
 
         barra = ttk.Frame(frame)
-        barra.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
+        barra.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 5))
 
         ttk.Label(
             barra,

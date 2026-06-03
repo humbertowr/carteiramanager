@@ -4,7 +4,7 @@ from tkinter import ttk
 from core.formatters import formatar_moeda, formatar_numero
 from ui.styles import configurar_tags_tabela
 from ui.sortable_tree import aplicar_ordenacao_treeview
-from ui.ux_helpers import aplicar_menu_generico_tabela
+from ui.ux_helpers import aplicar_estado_vazio_treeview, aplicar_menu_generico_tabela, criar_cabecalho_aba
 
 
 class GargalosTab:
@@ -15,14 +15,15 @@ class GargalosTab:
         self.criar_interface()
 
     def criar_interface(self):
-        container = ttk.Frame(self.parent, padding=(10, 8))
+        container = ttk.Frame(self.parent, padding=(8, 6))
         container.pack(fill="both", expand=True)
+        criar_cabecalho_aba(container, "Gargalos", "Resumo das pendências por motivo, valor e impacto no PROG 2.")
         self.criar_resumo(container)
         self.criar_tabela(container)
 
     def criar_resumo(self, parent):
-        frame = ttk.LabelFrame(parent, text="Dashboard de gargalos", padding=(10, 8), style="Section.TLabelframe")
-        frame.pack(fill="x", pady=(0, 8))
+        frame = ttk.LabelFrame(parent, text="Dashboard de gargalos", padding=(7, 5), style="Section.TLabelframe")
+        frame.pack(fill="x", pady=(0, 6))
 
         self.label_total_pendencias = ttk.Label(frame, text="Itens com pendência: 0", style="SummaryValue.TLabel")
         self.label_total_pendencias.grid(row=0, column=0, padx=(0, 18), sticky="w")
@@ -45,11 +46,11 @@ class GargalosTab:
         frame.columnconfigure(4, weight=1)
 
     def criar_tabela(self, parent):
-        frame = ttk.LabelFrame(parent, text="Resumo por motivo", padding=(8, 6), style="Section.TLabelframe")
+        frame = ttk.LabelFrame(parent, text="Resumo por motivo", padding=(7, 5), style="Section.TLabelframe")
         frame.pack(fill="both", expand=True)
 
         barra = ttk.Frame(frame, style="Card.TFrame")
-        barra.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
+        barra.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 5))
         ttk.Label(
             barra,
             text="Abra cada motivo para ver os pedidos e itens afetados.",
@@ -96,6 +97,7 @@ class GargalosTab:
         self.tabela.delete(*self.tabela.get_children())
 
         if not self.state.tem_dados():
+            aplicar_estado_vazio_treeview(self.tabela, "Nenhuma carteira carregada. Importe um CSV para calcular gargalos.")
             self.atualizar_labels(0, 0, 0, "-")
             return
 
@@ -105,6 +107,7 @@ class GargalosTab:
             df = self.state.df_com_bloqueios(self.state.df_aberto())
 
         if df.empty:
+            aplicar_estado_vazio_treeview(self.tabela, "Nenhum dado disponível para gargalos.")
             self.atualizar_labels(0, 0, 0, "-")
             return
 
@@ -164,6 +167,8 @@ class GargalosTab:
         maior_motivo = "-"
         if resumo:
             maior_motivo = max(resumo.items(), key=lambda item: item[1]["valor_liberado"])[0]
+        else:
+            aplicar_estado_vazio_treeview(self.tabela, "Nenhuma pendência registrada no PROG 2.")
 
         for indice, (motivo, dados) in enumerate(
             sorted(resumo.items(), key=lambda item: item[1]["valor_liberado"], reverse=True),

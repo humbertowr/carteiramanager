@@ -4,7 +4,7 @@ from tkinter import ttk
 from core.formatters import formatar_moeda, formatar_numero
 from ui.styles import configurar_tags_tabela
 from ui.sortable_tree import aplicar_ordenacao_treeview
-from ui.ux_helpers import aplicar_menu_generico_tabela
+from ui.ux_helpers import aplicar_estado_vazio_treeview, aplicar_menu_generico_tabela, criar_cabecalho_aba
 
 
 class BloqueiosTab:
@@ -21,9 +21,10 @@ class BloqueiosTab:
         self.criar_interface()
 
     def criar_interface(self):
-        container = ttk.Frame(self.parent, padding=(10, 8))
+        container = ttk.Frame(self.parent, padding=(8, 6))
         container.pack(fill="both", expand=True)
 
+        criar_cabecalho_aba(container, "Bloqueios", "Registros bloqueados na carteira e ações de liberação.")
         self.criar_topo(container)
         self.criar_tabela(container)
 
@@ -31,10 +32,10 @@ class BloqueiosTab:
         frame_topo = ttk.LabelFrame(
             parent,
             text="Bloqueios aplicados",
-            padding=(8, 6),
+            padding=(7, 5),
             style="Section.TLabelframe"
         )
-        frame_topo.pack(fill="x", pady=(0, 6))
+        frame_topo.pack(fill="x", pady=(0, 5))
 
         ttk.Label(frame_topo, text="Buscar", style="Hint.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 5))
 
@@ -63,21 +64,21 @@ class BloqueiosTab:
 
         ttk.Button(
             frame_topo,
-            text="Liberar selecionado",
+            text="Liberar",
             command=self.controller.liberar_bloqueio_na_aba,
             style="Success.TButton"
         ).grid(row=0, column=4, sticky="w", padx=3)
 
         ttk.Button(
             frame_topo,
-            text="Limpar todos",
+            text="Liberar todos",
             command=self.controller.limpar_todos_bloqueios,
             style="Danger.TButton"
         ).grid(row=0, column=5, sticky="w", padx=3)
 
         ttk.Label(
             frame_topo,
-            text="Revise bloqueios por pedido, item, cliente ou observação. Clique nos cabeçalhos para ordenar.",
+            text="Mostra somente registros bloqueados. Use Liberar selecionado ou Liberar todos para remover bloqueios.",
             style="Hint.TLabel"
         ).grid(row=1, column=0, columnspan=6, sticky="w", pady=(6, 0))
 
@@ -86,8 +87,8 @@ class BloqueiosTab:
     def criar_tabela(self, parent):
         frame_tabela = ttk.LabelFrame(
             parent,
-            text="Lista de bloqueios",
-            padding=(8, 6),
+            text="Registros bloqueados",
+            padding=(7, 5),
             style="Section.TLabelframe"
         )
         frame_tabela.pack(fill="both", expand=True)
@@ -155,6 +156,7 @@ class BloqueiosTab:
         self.mapa_linhas.clear()
 
         if not self.state.tem_dados():
+            aplicar_estado_vazio_treeview(self.tabela, "Nenhuma carteira carregada. Importe um CSV para visualizar bloqueios.")
             return
 
         df = self.state.gerar_df_bloqueios()
@@ -200,6 +202,9 @@ class BloqueiosTab:
             )
 
             self.mapa_linhas[iid] = id_linha
+
+        if not self.mapa_linhas:
+            aplicar_estado_vazio_treeview(self.tabela, "Nenhum bloqueio ativo.")
 
     def get_selected_id_linha(self):
         selecionado = self.tabela.selection()
